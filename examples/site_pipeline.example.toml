@@ -1,0 +1,78 @@
+schema_version = 2
+site_name = "CHANGE_ME"
+hash_contents = true
+heldout_patterns = ["holdout*.MP4", "holdout_frames"]
+holdout_provenance = "MAPPING_DISJOINT_UNVERIFIED_OUTER"
+max_reinforcement_rounds = 2
+
+[thresholds.keyframes]
+baseline_fps = 1.0
+fast_fps = 2.0
+static_fps = 0.5
+min_gap_seconds = 0.5
+max_gap_seconds = 1.0
+motion_threshold = 2.0
+min_segment_frames = 2
+
+[resources]
+diagnostic_keyframe_budget = 2000
+
+[adapters.frame_analyzer]
+probe_fps = 2.0
+
+# External workers consume one AdapterRequest JSON object on stdin and emit one
+# receipt JSON object on stdout. Replace all paths before use.
+[adapters.retrieval]
+command = ["GLUEMAP_PYTHON", "-m", "sfm_diagnosis.site_pipeline.salad_worker"]
+resource_class = "gpu_heavy"
+gluemap_root = "GLUEMAP_ROOT"
+config_file = "GLUEMAP_CONFIG_JSON"
+checkpoint_sha256 = "SALAD_CHECKPOINT_SHA256"
+top_k = 20
+temporal_radius = 4
+loop_min_time_delta = 30.0
+
+[adapters.retrieval.env]
+PYTHONPATH = "MAPPING_DIAGNOSIS_SRC"
+
+[adapters.pair_matcher]
+command = ["EDM_PYTHON", "-m", "sfm_diagnosis.site_pipeline.edm_worker"]
+resource_class = "matcher"
+repo = "EDM_ROOT"
+checkpoint = "EDM_CHECKPOINT"
+checkpoint_sha256 = "EDM_CHECKPOINT_SHA256"
+model_config = "EDM_MODEL_CONFIG"
+data_config = "EDM_DATA_CONFIG"
+input_size = [640, 480]
+
+[adapters.pair_matcher.env]
+PYTHONPATH = "MAPPING_DIAGNOSIS_SRC"
+
+[adapters.diagnostic_mapper]
+command = ["GLUEMAP_PYTHON", "-m", "sfm_diagnosis.site_pipeline.gluemap_worker"]
+resource_class = "gluemap"
+gluemap_root = "GLUEMAP_ROOT"
+config_file = "GLUEMAP_CONFIG_JSON"
+
+[adapters.diagnostic_mapper.env]
+PYTHONPATH = "MAPPING_DIAGNOSIS_SRC"
+
+[adapters.final_mapper]
+command = ["GLUEMAP_PYTHON", "-m", "sfm_diagnosis.site_pipeline.gluemap_worker"]
+resource_class = "gluemap"
+gluemap_root = "GLUEMAP_ROOT"
+config_file = "GLUEMAP_CONFIG_JSON"
+
+[adapters.final_mapper.env]
+PYTHONPATH = "MAPPING_DIAGNOSIS_SRC"
+
+[adapters.localizer]
+command = ["EDM_PYTHON", "-m", "sfm_diagnosis.site_pipeline.localization_worker"]
+resource_class = "matcher"
+query_manifest = "IMMUTABLE_HOLDOUT_QUERY_MANIFEST.jsonl"
+loo_mode = "strict"
+provider_factory = "DEPLOYMENT_MODULE:create_edm_provider"
+provider_allowlist = ["DEPLOYMENT_MODULE"]
+
+[adapters.localizer.env]
+PYTHONPATH = "MAPPING_DIAGNOSIS_SRC"

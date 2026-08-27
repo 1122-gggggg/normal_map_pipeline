@@ -1,0 +1,215 @@
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+from typing import Sequence
+
+from .config import PipelineConfig
+from .pipeline import ApprovalRequired, SitePipeline
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="site-sfm-pipeline",
+        description="Graph-aware, segment-centric multi-video SfM pipeline.",
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    initialize = commands.add_parser("init", help="Create immutable corpus inventory")
+    initialize.add_argument("--config", type=Path, required=True)
+    initialize.add_argument("--corpus", type=Path, required=True)
+    initialize.add_argument("--metadata", type=Path)
+    initialize.add_argument("--output", type=Path, required=True)
+    initialize.add_argument("--force", action="store_true")
+
+    run = commands.add_parser("run", help="Run or resume pipeline stages")
+    run.add_argument("--run", type=Path, required=True)
+    run.add_argument("--from-stage")
+    run.add_argument("--to-stage")
+    run.add_argument("--force", action="store_true")
+
+    status = commands.add_parser("status", help="Show stage and approval status")
+    status.add_argument("--run", type=Path, required=True)
+
+    approve = commands.add_parser("approve-final", help="Approve exact Final input")
+    approve.add_argument("--run", type=Path, required=True)
+    approve.add_argument("--decision-sha", required=True)
+    approve.add_argument("--approver", required=True)
+
+    export = commands.add_parser("export", help="Regenerate final manifests")
+    export.add_argument("--run", type=Path, required=True)
+
+    backfill = commands.add_parser("backfill", help="Import legacy manifests as candidate evidence")
+    backfill.add_argument("--run", type=Path, required=True)
+    backfill.add_argument("--legacy-run", type=Path, required=True)
+
+    normalize = commands.add_parser(
+        "normalize-selection",
+        help="Remove zero-degree keyframes before final approval",
+    )
+    normalize.add_argument("--run", type=Path, required=True)
+
+    enrich = commands.add_parser(
+        "enrich-bridge",
+        help="Add evidence-selected bridge keyframes and invalidate prior products",
+    )
+    enrich.add_argument("--run", type=Path, required=True)
+    enrich.add_argument("--segment", action="append", default=[])
+    enrich.add_argument("--keyframe", action="append", default=[])
+    enrich.add_argument("--attempt-name", required=True)
+
+    layers = commands.add_parser(
+        "materialize-layers",
+        help="Create robust base geometry and retain the dense localization layer",
+    )
+    layers.add_argument("--run", type=Path, required=True)
+    layers.add_argument("--export-ply", action="store_true")
+
+    validate = commands.add_parser(
+        "validate-layers",
+        help="Run strict robust/dense localization and fuse the results",
+    )
+    validate.add_argument("--run", type=Path, required=True)
+    validate.add_argument("--maximum-position-normalized", type=float, default=0.02)
+    validate.add_argument("--maximum-rotation-deg", type=float, default=2.0)
+    validate.add_argument("--target-rate", type=float, default=0.95)
+    validate.add_argument("--outer-holdout-frozen", action="store_true")
+
+    fuse = commands.add_parser(
+        "fuse-localization",
+        help="Fuse strict robust/dense localization validations",
+    )
+    fuse.add_argument("--run", type=Path, required=True)
+    fuse.add_argument("--robust-validation", type=Path, required=True)
+    fuse.add_argument("--dense-validation", type=Path, required=True)
+    fuse.add_argument("--scene-scale", type=float)
+    fuse.add_argument("--maximum-position-normalized", type=float, default=0.02)
+    fuse.add_argument("--maximum-rotation-deg", type=float, default=2.0)
+    fuse.add_argument("--target-rate", type=float, default=0.95)
+    fuse.add_argument("--outer-holdout-frozen", action="store_true")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        if args.command == "init":
+            pipeline = SitePipeline(PipelineConfig.from_toml(args.config))
+            result = pipeline.initialize(
+                args.corpus,
+                args.output,
+                metadata=args.metadata,
+                force=args.force,
+            )
+            payload = _result_payload(result)
+        elif args.command == "backfill":
+            from .migration import backfill_legacy_run
+
+            receipt = backfill_legacy_run(args.legacy_run, args.run)
+            payload = {"backfill_receipt": str(receipt)}
+        elif args.command == "normalize-selection":
+            from .selection_tools import normalize_run_selection
+
+            payload = {"normalization_receipt": str(normalize_run_selection(args.run))}
+        elif args.command == "enrich-bridge":
+            from .selection_tools import enrich_run_selection
+
+            payload = {
+                "bridge_enrichment_receipt": str(
+                    enrich_run_selection(
+                        args.run,
+                        target_segments=set(args.segment),
+                        target_keyframes=set(args.keyframe),
+                        attempt_name=args.attempt_name,
+                    )
+                )
+            }
+        elif args.command == "materialize-layers":
+            from .release import materialize_layers
+
+            payload = {
+                "robust_filter_receipt": str(
+                    materialize_layers(args.run, export_ply=args.export_ply)
+                )
+            }
+        elif args.command == "validate-layers":
+            from .release import validate_localization_layers
+
+            payload = {
+                "ensemble_validation_receipt": str(
+                    validate_localization_layers(
+                        args.run,
+                        maximum_position_normalized=args.maximum_position_normalized,
+                        maximum_rotation_deg=args.maximum_rotation_deg,
+                        target_rate=args.target_rate,
+                        outer_holdout_frozen=args.outer_holdout_frozen,
+                    )
+                )
+            }
+        elif args.command == "fuse-localization":
+            from .release import fuse_localization_results
+
+            payload = {
+                "ensemble_validation_receipt": str(
+                    fuse_localization_results(
+                        args.run,
+                        args.robust_validation,
+                        args.dense_validation,
+                        scene_scale=args.scene_scale,
+                        maximum_position_normalized=args.maximum_position_normalized,
+                        maximum_rotation_deg=args.maximum_rotation_deg,
+                        target_rate=args.target_rate,
+                        outer_holdout_frozen=args.outer_holdout_frozen,
+                    )
+                )
+            }
+        else:
+            pipeline = SitePipeline.open(args.run)
+            if args.command == "run":
+                payload = _result_payload(
+                    pipeline.run(
+                        args.run,
+                        from_stage=args.from_stage,
+                        to_stage=args.to_stage,
+                        force=args.force,
+                    )
+                )
+            elif args.command == "status":
+                payload = pipeline.status(args.run)
+            elif args.command == "approve-final":
+                approval = pipeline.approve_final(
+                    args.run, args.decision_sha, approver=args.approver
+                )
+                payload = {"approval": str(approval)}
+            else:
+                payload = _result_payload(pipeline.export(args.run))
+    except ApprovalRequired as error:
+        print(json.dumps({"status": "APPROVAL_REQUIRED", "reason": str(error)}, indent=2))
+        return 3
+    except (OSError, RuntimeError, ValueError) as error:
+        print(
+            json.dumps(
+                {"status": "FAILED", "error_type": type(error).__name__, "reason": str(error)},
+                indent=2,
+            )
+        )
+        return 2
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    return 0
+
+
+def _result_payload(result) -> dict[str, object]:
+    return {
+        "run_dir": str(result.run_dir),
+        "status": result.status,
+        "receipt": str(result.receipt),
+        "stages": [{"name": stage.name, "status": stage.status} for stage in result.stages],
+    }
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
+
+
+__all__ = ["build_parser", "main"]

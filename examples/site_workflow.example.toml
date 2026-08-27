@@ -1,0 +1,42 @@
+site_name = "CHANGE_ME"
+hash_video_contents = true
+heldout_patterns = ["holdout*.MP4"]
+
+[paths]
+selection_manifest = "selection/manifest.json"
+selected_images = "selection/images"
+map_model = "mapping/model"
+fast_risk = "map_diagnosis"
+edm_results = "localization/edm_loo_results.json"
+final_risk = "risk"
+
+# Replace these three deployment adapters. Every placeholder resolves to an absolute path.
+[[stages]]
+name = "selection"
+command = ["SELECTOR_COMMAND", "--videos", "{video_manifest}", "--images", "{selected_images}", "--output", "{selection_manifest}"]
+requires = ["{video_manifest}"]
+produces = ["{selection_manifest}", "{selected_images}"]
+
+[[stages]]
+name = "mapping"
+command = ["GLUEMAP_COMMAND", "--selection", "{selection_manifest}", "--images", "{selected_images}", "--output", "{map_model}"]
+requires = ["{selection_manifest}", "{selected_images}"]
+produces = ["{map_model}/cameras.bin", "{map_model}/images.bin", "{map_model}/points3D.bin"]
+
+[[stages]]
+name = "map_diagnosis"
+command = ["edm-risk-diagnosis", "--map", "{map_model}", "--mode", "fast", "--color-images", "{selected_images}", "--voxel-size", "1.0", "--yaw-step", "30", "--pitch-values=-30,0,30", "--output", "{fast_risk}"]
+requires = ["{map_model}/points3D.bin"]
+produces = ["{fast_risk}/risk_map.json", "{fast_risk}/risk_map.ply"]
+
+[[stages]]
+name = "localization_loo"
+command = ["EDM_LOO_COMMAND", "--map", "{map_model}", "--videos", "{video_manifest}", "--loo-mode", "strict", "--output", "{edm_results}"]
+requires = ["{map_model}/points3D.bin", "{video_manifest}"]
+produces = ["{edm_results}"]
+
+[[stages]]
+name = "risk_diagnosis"
+command = ["edm-risk-diagnosis", "--map", "{map_model}", "--mode", "full", "--edm-results", "{edm_results}", "--edm-format", "canonical", "--loo-mode", "strict", "--color-images", "{selected_images}", "--voxel-size", "1.0", "--yaw-step", "30", "--pitch-values=-30,0,30", "--risk-feature-set", "F", "--target-recall", "0.95", "--output", "{final_risk}"]
+requires = ["{map_model}/points3D.bin", "{edm_results}"]
+produces = ["{final_risk}/risk_map.json", "{final_risk}/risk_map.html", "{final_risk}/risk_map.ply", "{final_risk}/dead_zones.json", "{final_risk}/ablation.json"]

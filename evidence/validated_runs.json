@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "evidence_date": "2026-08-27",
+  "method_profile": "graph_aware_v3_robust_dense_ensemble",
+  "development_validation": {
+    "source_run": "graph_aware_v3_balanced_robust_20260826",
+    "selection": {
+      "mapping_images": 753,
+      "segments": 185,
+      "verified_pairs": 6881,
+      "connected_components": 1,
+      "holdout_leaks": 0
+    },
+    "dense_map": {
+      "registered_images": 753,
+      "points": 443517,
+      "observations": 4026543,
+      "reprojection_p90_px": 4.941
+    },
+    "robust_map": {
+      "registered_images": 753,
+      "points": 227818,
+      "observations": 2599061,
+      "minimum_track_length": 3,
+      "reprojection_p90_px": 1.654
+    },
+    "strict_localization": {
+      "protocol": "MegaLoc top-5 + EDM + 2D-to-3D lifting + COLMAP PnP",
+      "queries": 789,
+      "robust_successes": 591,
+      "dense_successes": 589,
+      "ensemble_successes": 631,
+      "ensemble_success_rate": 0.7997465145754119,
+      "cross_layer_agreements": 541,
+      "single_layer_accepts": 90,
+      "cross_layer_disagreement_rejections": 4,
+      "target_rate": 0.95,
+      "release_interpretation": "development evidence only; the reused 789-query set is not an unbiased outer holdout"
+    }
+  },
+  "river_geometry_validation": {
+    "source_run": "river_graph_aware_v3_all_videos_20260827",
+    "inputs": {
+      "videos": 7,
+      "sanitized_frames": 1356,
+      "adaptive_keyframes": 977,
+      "retrieval_candidates": 43234,
+      "unique_edm_pairs": 21479,
+      "verified_pairs": 14870
+    },
+    "final_selection": {
+      "mapping_images": 450,
+      "admitted_pairs": 4598,
+      "active_segments": 37
+    },
+    "robust_map": {
+      "registered_images": 450,
+      "points": 167961,
+      "observations": 1809867,
+      "track_ge3_fraction": 1.0,
+      "reprojection_p50_px": 0.817549256661562,
+      "reprojection_p90_px": 1.4709553829793949,
+      "reprojection_p99_px": 1.9002138164955495,
+      "qa_score": 100.0,
+      "qa_grade": "A",
+      "component_sizes_at_15_shared_landmarks": [448, 1, 1],
+      "articulation_images_in_main_component": 0,
+      "bridge_edges_in_main_component": 0
+    },
+    "bridge_repair": {
+      "added_frames": 7,
+      "triple_tracks_crossing_former_components": 680,
+      "leave_one_added_frame_out_all_connected": true
+    },
+    "map_only_risk_diagnosis": {
+      "mode": "fast",
+      "spatial_positions": 36,
+      "virtual_pose_samples": 1296,
+      "yaw_step_deg": 30.0,
+      "pitch_values_deg": [-30.0, 0.0, 30.0],
+      "fim": "enabled analytical pixel-bearing proxy",
+      "actloc": "disabled",
+      "visibility": "frustum_only",
+      "occlusion_verified": false,
+      "failure_probability": "uncalibrated_unknown"
+    },
+    "localization_status": "PENDING_NEW_OUTER_HOLDOUT_VIDEO"
+  }
+}

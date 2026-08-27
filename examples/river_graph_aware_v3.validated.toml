@@ -1,0 +1,172 @@
+schema_version = 2
+site_name = "CHANGE_ME"
+hash_contents = true
+heldout_patterns = ["outer_holdout*.MP4", "outer_holdout_frames"]
+holdout_provenance = "MAPPING_DISJOINT_FROZEN_OUTER"
+max_reinforcement_rounds = 2
+allow_unknown_metadata = false
+required_metadata = ["session_id", "route", "direction", "camera_mode", "crop_state", "stabilization_state", "intrinsics_group"]
+
+[thresholds.keyframes]
+baseline_fps = 1.0
+fast_fps = 2.0
+static_fps = 0.5
+min_gap_seconds = 0.5
+max_gap_seconds = 1.0
+motion_threshold = 2.0
+min_segment_frames = 2
+
+[resources]
+diagnostic_keyframe_target = 500
+diagnostic_keyframe_budget = 2000
+tiered_loo_enabled = true
+# Set only when every external runtime must target one GPU architecture.
+# require_compute_capability = "12.0"
+
+[resources.robust_filter]
+max_reprojection_error_px = 3.0
+minimum_triangulation_angle_deg = 1.5
+minimum_track_length = 3
+bundle_adjustment_iterations = 100
+bundle_adjustment_threads = 8
+
+[adapters.frame_analyzer]
+probe_fps = 2.0
+
+[adapters.retrieval]
+command = ["/CHANGE_ME/gluemap-python", "-m", "sfm_diagnosis.site_pipeline.salad_worker"]
+resource_class = "gpu_heavy"
+gluemap_root = "/CHANGE_ME/gluemap"
+config_file = "/CHANGE_ME/gluemap.validated.json"
+checkpoint_sha256 = "6b3f1720954293e83da6966c5cfcfc6713200d7fefadcca76fc51aeb80b3cada"
+top_k = 20
+temporal_radius = 4
+loop_min_time_delta = 30.0
+
+[adapters.retrieval.category_caps]
+temporal = 9
+same_session = 10
+cross_video = 20
+cross_session = 20
+loop = 10
+
+[adapters.retrieval.env]
+PYTHONPATH = "/CHANGE_ME/normal_map_pipeline/src"
+
+[adapters.pair_matcher]
+command = ["/CHANGE_ME/edm-python", "-m", "sfm_diagnosis.site_pipeline.edm_worker"]
+resource_class = "matcher"
+repo = "/CHANGE_ME/EDM"
+checkpoint = "/CHANGE_ME/EDM/weights/edm_outdoor.ckpt"
+checkpoint_sha256 = "f686bebdd9705bf6918621a1a83695f83d698cbd8c3eed932847fe3678d13a97"
+model_config = "/CHANGE_ME/EDM/configs/edm/outdoor/edm_base.py"
+data_config = "/CHANGE_ME/EDM/configs/data/megadepth_test_1500.py"
+input_size = [640, 480]
+min_inliers_for_verified = 30
+min_inlier_ratio_for_verified = 0.1
+min_cheirality_for_verified = 0.5
+
+# Verified river calibration. Replace the whole block for another camera.
+[adapters.pair_matcher.intrinsics_calibration]
+K = [[960.4853099760471, 0.0, 670.8167651412149], [0.0, 958.1961747147875, 358.7191813450141], [0.0, 0.0, 1.0]]
+image_width = 1280
+image_height = 720
+images_are_undistorted = true
+source_dist_reference_only = [-0.016359355216362784, 0.256336300878371, -0.006099082030819077, 0.019509803298460405, -0.1198628127364991]
+source_path = "/CHANGE_ME/intrinsics_calibration.json"
+source_sha256 = "REPLACE_WITH_CALIBRATION_SHA256"
+
+[adapters.pair_matcher.env]
+PYTHONPATH = "/CHANGE_ME/normal_map_pipeline/src"
+
+[adapters.diagnostic_mapper]
+command = ["/CHANGE_ME/gluemap-python", "-m", "sfm_diagnosis.site_pipeline.gluemap_worker"]
+resource_class = "gluemap"
+gluemap_root = "/CHANGE_ME/gluemap"
+config_file = "/CHANGE_ME/gluemap.validated.json"
+evidence_level = "refined_geometry"
+reuse_inference_cache = true
+sift_device = "cpu"
+skip_doppelgangers = true
+workspace_root = "/CHANGE_ME/workspaces/diagnostic"
+
+[adapters.diagnostic_mapper.intrinsics_calibration]
+K = [[960.4853099760471, 0.0, 670.8167651412149], [0.0, 958.1961747147875, 358.7191813450141], [0.0, 0.0, 1.0]]
+image_width = 1280
+image_height = 720
+images_are_undistorted = true
+source_path = "/CHANGE_ME/intrinsics_calibration.json"
+source_sha256 = "REPLACE_WITH_CALIBRATION_SHA256"
+
+[adapters.diagnostic_mapper.env]
+PYTHONPATH = "/CHANGE_ME/normal_map_pipeline/src"
+
+[adapters.final_mapper]
+command = ["/CHANGE_ME/gluemap-python", "-m", "sfm_diagnosis.site_pipeline.gluemap_worker"]
+resource_class = "gluemap"
+gluemap_root = "/CHANGE_ME/gluemap"
+config_file = "/CHANGE_ME/gluemap.validated.json"
+evidence_level = "refined_geometry"
+reuse_inference_cache = true
+sift_device = "cpu"
+skip_doppelgangers = true
+workspace_root = "/CHANGE_ME/workspaces/final"
+
+[adapters.final_mapper.intrinsics_calibration]
+K = [[960.4853099760471, 0.0, 670.8167651412149], [0.0, 958.1961747147875, 358.7191813450141], [0.0, 0.0, 1.0]]
+image_width = 1280
+image_height = 720
+images_are_undistorted = true
+source_path = "/CHANGE_ME/intrinsics_calibration.json"
+source_sha256 = "REPLACE_WITH_CALIBRATION_SHA256"
+
+[adapters.final_mapper.env]
+PYTHONPATH = "/CHANGE_ME/normal_map_pipeline/src"
+
+[adapters.localizer]
+command = ["/CHANGE_ME/edm-python", "-m", "sfm_diagnosis.site_pipeline.localization_worker"]
+resource_class = "matcher"
+query_manifest = "{run_dir}/inputs/holdout_queries.jsonl"
+loo_mode = "strict"
+provider_factory = "sfm_diagnosis.site_pipeline.deployment_localizer:create_edm_provider"
+provider_allowlist = ["sfm_diagnosis.site_pipeline.deployment_localizer"]
+timeout_seconds = 7200
+
+[adapters.localizer.provider_kwargs]
+map_model = "{run_dir}/products/base_geometry/model"
+keyframes = "{run_dir}/artifacts/keyframes/keyframes.jsonl"
+query_manifest = "{run_dir}/inputs/holdout_queries.jsonl"
+cache_dir = "{run_dir}/artifacts/localization/provider-cache"
+megaloc_source = "/CHANGE_ME/MegaLoc"
+megaloc_checkpoint = "/CHANGE_ME/MegaLoc/model.safetensors"
+top_k = 5
+lift_distance_px = 2.0
+descriptor_batch_size = 8
+
+[adapters.localizer.provider_kwargs.edm_config]
+repo = "/CHANGE_ME/EDM"
+checkpoint = "/CHANGE_ME/EDM/weights/edm_outdoor.ckpt"
+checkpoint_sha256 = "f686bebdd9705bf6918621a1a83695f83d698cbd8c3eed932847fe3678d13a97"
+model_config = "/CHANGE_ME/EDM/configs/edm/outdoor/edm_base.py"
+data_config = "/CHANGE_ME/EDM/configs/data/megadepth_test_1500.py"
+input_size = [640, 480]
+confidence_threshold = 0.0
+
+[adapters.localizer.provider_kwargs.intrinsics_calibration]
+K = [[960.4853099760471, 0.0, 670.8167651412149], [0.0, 958.1961747147875, 358.7191813450141], [0.0, 0.0, 1.0]]
+image_width = 1280
+image_height = 720
+images_are_undistorted = true
+source_path = "/CHANGE_ME/intrinsics_calibration.json"
+source_sha256 = "REPLACE_WITH_CALIBRATION_SHA256"
+
+[adapters.localizer.provider_kwargs.thresholds]
+strong_inliers = 80
+minimum_inlier_ratio = 0.25
+minimum_hull_coverage = 0.15
+minimum_occupancy_4x4 = 6
+minimum_positive_depth_ratio = 0.99
+maximum_reprojection_p90_px = 3.0
+
+[adapters.localizer.env]
+PYTHONPATH = "/CHANGE_ME/normal_map_pipeline/src"
