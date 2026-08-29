@@ -8,6 +8,15 @@ from river_v4_optimizer.forced_pairs import (
     build_forced_cross_video_pairs,
     merge_pair_geometry,
 )
+from river_v4_optimizer.detector_free_injection import (
+    DetectorFreeInjectionConfig,
+    DetectorFreeMatch,
+    PlannedDetectorFreeTrack,
+    cluster_detector_free_matches,
+    inject_planned_tracks,
+    plan_detector_free_tracks,
+    validate_planned_track,
+)
 from river_v4_optimizer.metrics import (
     component_summary,
     evaluate_objective_improvement,
@@ -217,6 +226,220 @@ def test_merge_pair_geometry_prefers_stronger_admission_and_is_deterministic() -
     ]
     assert merged[0]["admission"] == "VERIFIED"
     assert merged[0]["inliers_E"] == 50
+
+
+def test_detector_free_clustering_builds_one_coherent_three_view_track() -> None:
+    matches = [
+        DetectorFreeMatch("video-a:1", (10.0, 10.0), "video-b:1", (20.0, 20.0)),
+        DetectorFreeMatch("video-a:1", (10.4, 9.8), "video-c:1", (30.0, 30.0)),
+    ]
+
+    tracks, rejected = cluster_detector_free_matches(
+        matches,
+        anchor_radius_px=1.0,
+        maximum_anchor_spread_px=1.5,
+    )
+
+    assert rejected == 0
+    assert len(tracks) == 1
+    assert set(tracks[0]) == {"video-a:1", "video-b:1", "video-c:1"}
+    assert tracks[0]["video-a:1"] == pytest.approx((10.2, 9.9))
+
+
+def test_detector_free_clustering_rejects_chained_anchor_with_excessive_spread() -> None:
+    matches = [
+        DetectorFreeMatch("video-a:1", (10.0, 10.0), "video-b:1", (20.0, 20.0)),
+        DetectorFreeMatch("video-a:1", (10.9, 10.0), "video-c:1", (30.0, 30.0)),
+        DetectorFreeMatch("video-a:1", (11.8, 10.0), "video-d:1", (40.0, 40.0)),
+    ]
+
+    tracks, rejected = cluster_detector_free_matches(
+        matches,
+        anchor_radius_px=1.0,
+        maximum_anchor_spread_px=0.8,
+    )
+
+    assert tracks == []
+    assert rejected == 1
+
+
+def test_detector_free_injection_adds_a_new_three_view_point_without_moving_old_geometry(
+    tmp_path,
+) -> None:
+    import numpy as np
+    import pycolmap
+
+    options = pycolmap.SyntheticDatasetOptions()
+    options.num_rigs = 3
+    options.num_frames_per_rig = 2
+    options.num_points3D = 40
+    options.track_length = 3
+    reconstruction = pycolmap.synthesize_dataset(options)
+    source_point = next(iter(reconstruction.points3D.values()))
+    image_ids = [element.image_id for element in source_point.track.elements[:3]]
+    observations = tuple(
+        (
+            reconstruction.images[image_id].name,
+            tuple(reconstruction.images[image_id].project_point(source_point.xyz)),
+        )
+        for image_id in image_ids
+    )
+    input_model = tmp_path / "input"
+    output_model = tmp_path / "output"
+    input_model.mkdir()
+    reconstruction.write(input_model)
+    points_before = reconstruction.num_points3D()
+    observations_before = reconstruction.compute_num_observations()
+    plan = PlannedDetectorFreeTrack(
+        xyz=tuple(np.asarray(source_point.xyz) + np.asarray([0.0, 0.0, 1e-3])),
+        observations=observations,
+        reprojection_errors_px=(0.0, 0.0, 0.0),
+        maximum_triangulation_angle_deg=5.0,
+    )
+
+    receipt = inject_planned_tracks(input_model, output_model, [plan])
+    injected = pycolmap.Reconstruction(output_model)
+
+    assert receipt["added_points3D"] == 1
+    assert receipt["added_observations"] == 3
+    assert injected.num_points3D() == points_before + 1
+    assert injected.compute_num_observations() == observations_before + 3
+
+
+def test_detector_free_injection_rejects_an_empty_plan(tmp_path) -> None:
+    with pytest.raises(RuntimeError, match="no detector-free tracks"):
+        inject_planned_tracks(tmp_path / "missing", tmp_path / "output", [])
+
+
+def test_detector_free_plan_gate_requires_required_videos_third_view_and_clean_geometry() -> None:
+    config = DetectorFreeInjectionConfig(
+        required_videos=("video-a", "video-b"),
+        minimum_distinct_videos=3,
+        maximum_reprojection_error_px=2.0,
+        maximum_reprojection_p90_px=1.5,
+        minimum_triangulation_angle_deg=1.0,
+    )
+    good = PlannedDetectorFreeTrack(
+        xyz=(0.0, 0.0, 5.0),
+        observations=(
+            ("video-a/a.jpg", (10.0, 10.0)),
+            ("video-b/b.jpg", (20.0, 20.0)),
+            ("video-c/c.jpg", (30.0, 30.0)),
+        ),
+        reprojection_errors_px=(0.5, 0.7, 1.0),
+        maximum_triangulation_angle_deg=3.0,
+    )
+
+    assert validate_planned_track(good, config) is None
+
+    missing_required = PlannedDetectorFreeTrack(
+        **{
+            **good.__dict__,
+            "observations": (
+                good.observations[0],
+                good.observations[2],
+                ("video-d/d.jpg", (40.0, 40.0)),
+            ),
+        }
+    )
+    assert validate_planned_track(missing_required, config) == "required_video_span"
+
+    high_error = PlannedDetectorFreeTrack(
+        **{**good.__dict__, "reprojection_errors_px": (0.5, 0.7, 2.1)}
+    )
+    assert validate_planned_track(high_error, config) == "reprojection_error"
+
+    low_angle = PlannedDetectorFreeTrack(
+        **{**good.__dict__, "maximum_triangulation_angle_deg": 0.5}
+    )
+    assert validate_planned_track(low_angle, config) == "triangulation_angle"
+
+
+def test_detector_free_planner_triangulates_a_three_video_track_from_pair_artifacts(
+    tmp_path,
+) -> None:
+    import numpy as np
+    import pycolmap
+
+    options = pycolmap.SyntheticDatasetOptions()
+    options.num_rigs = 3
+    options.num_frames_per_rig = 2
+    options.num_points3D = 80
+    options.track_length = 3
+    reconstruction = pycolmap.synthesize_dataset(options)
+    source_point = next(
+        point for point in reconstruction.points3D.values() if len(point.track.elements) >= 3
+    )
+    elements = list(source_point.track.elements)[:3]
+    keyframe_ids = ("video-a:1", "video-b:1", "video-c:1")
+    output_names = ("video-a/a.jpg", "video-b/b.jpg", "video-c/c.jpg")
+    keyframes = {}
+    projected = {}
+    for keyframe_id, output_name, element in zip(
+        keyframe_ids, output_names, elements, strict=True
+    ):
+        image = reconstruction.images[element.image_id]
+        image.name = output_name
+        projected[keyframe_id] = np.asarray(image.project_point(source_point.xyz))
+        keyframes[keyframe_id] = {"output_name": output_name}
+    model = tmp_path / "model"
+    model.mkdir()
+    reconstruction.write(model)
+    seed_artifact = tmp_path / "seed.npz"
+    support_artifact = tmp_path / "support.npz"
+    np.savez(
+        seed_artifact,
+        points_i=projected["video-a:1"][None],
+        points_j=projected["video-b:1"][None],
+        essential_mask=np.ones(1, dtype=np.uint8),
+    )
+    np.savez(
+        support_artifact,
+        points_i=projected["video-a:1"][None],
+        points_j=projected["video-c:1"][None],
+        essential_mask=np.ones(1, dtype=np.uint8),
+    )
+    config = DetectorFreeInjectionConfig(
+        required_videos=("video-a", "video-b"),
+        anchor_radius_px=1.0,
+        maximum_anchor_spread_px=1.0,
+        minimum_distinct_videos=3,
+        maximum_reprojection_error_px=2.0,
+        maximum_reprojection_p90_px=2.0,
+        minimum_triangulation_angle_deg=0.1,
+        existing_observation_conflict_radius_px=0.0,
+    )
+
+    plans, receipt = plan_detector_free_tracks(
+        model=model,
+        keyframes=keyframes,
+        seed_geometry=[
+            {
+                "image_i": "video-a:1",
+                "image_j": "video-b:1",
+                "admission": "VERIFIED",
+                "match_artifact": str(seed_artifact),
+            }
+        ],
+        support_geometry=[
+            {
+                "image_i": "video-a:1",
+                "image_j": "video-c:1",
+                "admission": "VERIFIED",
+                "match_artifact": str(support_artifact),
+            }
+        ],
+        selected_keyframes=set(keyframe_ids),
+        config=config,
+    )
+
+    assert len(plans) == 1
+    assert {name.split("/", 1)[0] for name, _ in plans[0].observations} == {
+        "video-a",
+        "video-b",
+        "video-c",
+    }
+    assert receipt["approved_tracks"] == 1
 
 
 def test_objective_improvement_requires_weak_frame_cleanup_and_track_balance() -> None:
