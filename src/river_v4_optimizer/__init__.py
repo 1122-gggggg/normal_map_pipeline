@@ -7,6 +7,7 @@ from .integration import (
     select_winner,
 )
 from .cleanup import prune_observation_free_registered_images
+from .forced_pairs import build_forced_cross_video_pairs, merge_pair_geometry
 from .metrics import (
     analyze_model,
     component_summary,
@@ -19,10 +20,12 @@ from .selection import rewire_selection
 __all__ = [
     "OptimizationRecipe",
     "analyze_model",
+    "build_forced_cross_video_pairs",
     "build_candidate_plan",
     "component_summary",
     "evaluate_objective_improvement",
     "focus_session_track_summary",
+    "merge_pair_geometry",
     "prunable_loser_models",
     "prune_observation_free_registered_images",
     "rank_variants",

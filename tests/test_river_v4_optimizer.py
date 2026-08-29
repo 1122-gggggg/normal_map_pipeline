@@ -4,6 +4,10 @@ import pytest
 
 from river_v4_optimizer.adapter import _mapper_request
 from river_v4_optimizer.cleanup import prune_observation_free_registered_images
+from river_v4_optimizer.forced_pairs import (
+    build_forced_cross_video_pairs,
+    merge_pair_geometry,
+)
 from river_v4_optimizer.metrics import (
     component_summary,
     evaluate_objective_improvement,
@@ -163,6 +167,56 @@ def test_focus_session_track_summary_reports_balance_without_double_counting_tra
     }
     assert summary["dominant_other_video"] == "session-a"
     assert summary["dominant_share"] == pytest.approx(2 / 3)
+
+
+def test_forced_cross_video_pairs_build_exact_cartesian_product() -> None:
+    rows = build_forced_cross_video_pairs(
+        ["p168:0001", "p168:0002", "p117:0003", "p117:0004", "other:0005"],
+        left_video="p168",
+        right_video="p117",
+        category="forced_p168_p117",
+    )
+
+    assert len(rows) == 4
+    assert {(row["image_i"], row["image_j"]) for row in rows} == {
+        ("p117:0003", "p168:0001"),
+        ("p117:0003", "p168:0002"),
+        ("p117:0004", "p168:0001"),
+        ("p117:0004", "p168:0002"),
+    }
+    assert {row["category"] for row in rows} == {"forced_p168_p117"}
+    assert {row["admission"] for row in rows} == {"CANDIDATE"}
+
+
+def test_forced_cross_video_pairs_fail_closed_when_one_video_is_absent() -> None:
+    with pytest.raises(ValueError, match="right video"):
+        build_forced_cross_video_pairs(
+            ["p168:0001"],
+            left_video="p168",
+            right_video="p117",
+            category="forced",
+        )
+
+
+def test_merge_pair_geometry_prefers_stronger_admission_and_is_deterministic() -> None:
+    merged = merge_pair_geometry(
+        [
+            {"image_i": "a", "image_j": "b", "admission": "AMBIGUOUS"},
+            {"image_i": "b", "image_j": "c", "admission": "VERIFIED"},
+        ],
+        [
+            {"image_i": "b", "image_j": "a", "admission": "VERIFIED", "inliers_E": 50},
+            {"image_i": "c", "image_j": "d", "admission": "REJECTED"},
+        ],
+    )
+
+    assert [(row["image_i"], row["image_j"]) for row in merged] == [
+        ("a", "b"),
+        ("b", "c"),
+        ("c", "d"),
+    ]
+    assert merged[0]["admission"] == "VERIFIED"
+    assert merged[0]["inliers_E"] == 50
 
 
 def test_objective_improvement_requires_weak_frame_cleanup_and_track_balance() -> None:
