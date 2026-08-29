@@ -11,6 +11,7 @@ requires-python = ">=3.10"
 license = {file = "LICENSE"}
 authors = [{name = "sfm-map-diagnosis contributors"}]
 dependencies = [
+  "networkx>=3.0",
   "numpy>=1.24",
   "scipy>=1.10",
   "PyYAML>=6.0",
@@ -36,6 +37,8 @@ edm-risk-diagnosis = "sfm_diagnosis.edm_risk.cli:main"
 edm-risk-ablation = "sfm_diagnosis.edm_risk.ablation:main"
 site-sfm-workflow = "sfm_diagnosis.site_workflow.cli:main"
 site-sfm-pipeline = "sfm_diagnosis.site_pipeline.cli:main"
+river-v4-optimize = "river_v4_optimizer.cli:main"
+river-optimize-map-adapter = "river_v4_optimizer.adapter:main"
 
 [project.urls]
 Homepage = "https://github.com/1122-gggggg/normal_map_pipeline"

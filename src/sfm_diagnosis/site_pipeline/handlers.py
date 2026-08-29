@@ -7,6 +7,7 @@ import json
 import shutil
 import time
 from collections import defaultdict
+from dataclasses import replace
 from pathlib import Path
 from statistics import median
 from typing import Any, Callable, Iterable, Mapping
@@ -24,6 +25,11 @@ from .adapters import (
 )
 from .domain import PreSfmRole, legacy_session_role, record_dict
 from .graph import diagnose_graph
+from .mapping_optimization import (
+    MappingOptimizationContract,
+    optimization_adapter_payload,
+    validate_optimizer_result,
+)
 from .policy import Candidate, assign_roles, diagnostic_select, reinforce_bridges
 from .post_sfm import diagnose_post_sfm, model_capabilities
 from .preprocessing import adaptive_keyframes, sanitize_frames, split_segments
@@ -42,7 +48,7 @@ def build_default_handlers(config) -> dict[str, Callable]:
         "stage09_post_sfm_diagnosis": post_sfm_diagnosis_stage,
         "stage10_role_assignment": role_assignment_stage,
         "stage11_reinforcement": reinforcement_stage,
-        "stage12_final_mapping": _configured("final_mapper"),
+        "stage12_final_mapping": final_mapping_stage,
         "stage13_final_diagnosis": final_diagnosis_stage,
         "stage14_localization_validation": _configured("localizer"),
     }
@@ -1279,6 +1285,106 @@ def _configured(adapter_name: str):
         return _run_adapter(context, adapter_name)
 
     return handler
+
+
+def final_mapping_stage(context):
+    contract = MappingOptimizationContract.from_mapping(context.config.mapping_optimization)
+    if not contract.enabled:
+        return _run_adapter(context, "final_mapper")
+    dense_model = context.run_dir / "artifacts/mapping/optimization/source/model"
+    dense_context = replace(context, expected_outputs=(dense_model,))
+    mapper_outcome = _run_adapter(dense_context, "final_mapper")
+    optimizer_outcome = _run_mapping_optimizer(context, dense_model, contract)
+    return _outcome(
+        context,
+        {
+            **dict(optimizer_outcome.details),
+            "optimization_enabled": True,
+            "dense_model": str(dense_model),
+            "baseline_mapper": dict(mapper_outcome.details),
+        },
+    )
+
+
+def _run_mapping_optimizer(context, dense_model: Path, contract: MappingOptimizationContract):
+    config = dict(context.config.adapters.get("mapping_optimizer") or {})
+    if not config:
+        _blocked(
+            "mapping optimization is enabled but adapter 'mapping_optimizer' is not configured"
+        )
+    command = config.get("command")
+    if not command:
+        _blocked("adapter 'mapping_optimizer' requires a command")
+    expanded = [
+        str(value).replace("{run_dir}", str(context.run_dir)).replace("{stage}", context.stage_name)
+        for value in command
+    ]
+    resource_class = str(config.get("resource_class") or "ba")
+    payload = optimization_adapter_payload(
+        context.run_dir,
+        dense_model,
+        context.expected_outputs[0],
+        contract,
+    )
+    payload["recipe"] = dict(context.config.mapping_optimization)
+    payload["final_mapper"] = dict(context.config.adapters.get("final_mapper") or {})
+    inputs = tuple(
+        str(path)
+        for path in (
+            dense_model,
+            context.run_dir / "decisions/final_selection.json",
+            context.run_dir / "artifacts/selection/roles.jsonl",
+            context.run_dir / "artifacts/keyframes/keyframes.jsonl",
+            context.run_dir / "artifacts/pairs/geometry.jsonl",
+            context.run_dir / "inputs/corpus_manifest.json",
+        )
+    )
+    request = AdapterRequest(
+        "stage12_mapping_optimization",
+        payload=payload,
+        config=config,
+        input_paths=inputs,
+        output_dir=str(Path(payload["optimization_root"])),
+        resource_class=resource_class,
+    )
+    adapter = CommandAdapter(
+        expanded,
+        cwd=(
+            str(config["cwd"]).replace("{run_dir}", str(context.run_dir))
+            if config.get("cwd")
+            else None
+        ),
+        env={str(key): str(value) for key, value in dict(config.get("env") or {}).items()},
+        timeout_seconds=(
+            None if config.get("timeout_seconds") is None else float(config["timeout_seconds"])
+        ),
+    )
+    with ExclusiveResourceLease(context.run_dir / "locks/heavy.lock", resource_class):
+        receipt = adapter.run(request)
+    winner = validate_optimizer_result(receipt.output, contract)
+    output_model = context.expected_outputs[0]
+    if not output_model.exists() and not output_model.is_symlink():
+        _link_or_copy(Path(str(winner["model"])).expanduser().resolve(), output_model)
+    required = (
+        output_model,
+        Path(str(payload["comparison"])),
+        Path(str(payload["summary"])),
+    )
+    absent = [str(path) for path in required if not path.exists()]
+    if absent:
+        raise RuntimeError(f"mapping optimizer did not produce contracted outputs: {absent}")
+    return _outcome(
+        context,
+        {
+            "adapter": "mapping_optimizer",
+            "request_fingerprint": receipt.request_fingerprint,
+            "command": list(receipt.command),
+            "winner": winner,
+            "methods_completed": list(receipt.output.get("methods_completed") or ()),
+            "comparison": str(payload["comparison"]),
+            "summary": str(payload["summary"]),
+        },
+    )
 
 
 def _run_adapter(context, adapter_name: str):

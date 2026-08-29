@@ -53,6 +53,7 @@ class PipelineConfig:
     required_metadata: tuple[str, ...] = DEFAULT_REQUIRED_METADATA
     allow_unknown_metadata: bool = False
     max_reinforcement_rounds: int = 2
+    mapping_optimization: Mapping[str, Any] = field(default_factory=dict)
     adapters: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     thresholds: Mapping[str, Any] = field(default_factory=dict)
     resources: Mapping[str, Any] = field(default_factory=dict)
@@ -84,6 +85,7 @@ class PipelineConfig:
             ),
             allow_unknown_metadata=bool(payload.get("allow_unknown_metadata", False)),
             max_reinforcement_rounds=int(payload.get("max_reinforcement_rounds", 2)),
+            mapping_optimization=dict(payload.get("mapping_optimization") or {}),
             adapters={
                 str(key): dict(value) for key, value in dict(payload.get("adapters") or {}).items()
             },
