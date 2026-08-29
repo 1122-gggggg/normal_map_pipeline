@@ -24,19 +24,32 @@ from .metrics import (
     focus_session_track_summary,
     rank_variants,
 )
-from .selection import rewire_selection
+from .sim3_audit import (
+    SimilarityTransform,
+    audit_shared_camera_sim3,
+    estimate_similarity_transform,
+    estimate_robust_similarity_transform,
+    relative_pose_residual,
+    transform_camera_pose_to_target_gauge,
+)
+from .selection import build_connected_submap_selection, rewire_selection
 
 __all__ = [
     "OptimizationRecipe",
     "DetectorFreeMatch",
     "DetectorFreeInjectionConfig",
     "PlannedDetectorFreeTrack",
+    "SimilarityTransform",
     "analyze_model",
+    "audit_shared_camera_sim3",
     "build_forced_cross_video_pairs",
     "build_candidate_plan",
+    "build_connected_submap_selection",
     "component_summary",
     "cluster_detector_free_matches",
     "evaluate_objective_improvement",
+    "estimate_similarity_transform",
+    "estimate_robust_similarity_transform",
     "focus_session_track_summary",
     "merge_pair_geometry",
     "inject_planned_tracks",
@@ -45,6 +58,8 @@ __all__ = [
     "prunable_loser_models",
     "prune_observation_free_registered_images",
     "rank_variants",
+    "relative_pose_residual",
     "rewire_selection",
     "select_winner",
+    "transform_camera_pose_to_target_gauge",
 ]

@@ -5,6 +5,12 @@ from typing import Any, Iterable, Mapping
 
 
 def _component_sizes(nodes: set[str], pairs: Iterable[Mapping[str, Any]]) -> list[int]:
+    return [len(component) for component in _connected_components(nodes, pairs)]
+
+
+def _connected_components(
+    nodes: set[str], pairs: Iterable[Mapping[str, Any]]
+) -> list[set[str]]:
     adjacency: dict[str, set[str]] = defaultdict(set)
     for pair in pairs:
         left, right = str(pair["image_i"]), str(pair["image_j"])
@@ -12,19 +18,85 @@ def _component_sizes(nodes: set[str], pairs: Iterable[Mapping[str, Any]]) -> lis
             adjacency[left].add(right)
             adjacency[right].add(left)
     remaining = set(nodes)
-    sizes = []
+    components = []
     while remaining:
         root = remaining.pop()
         queue = deque([root])
-        size = 0
+        component = {root}
         while queue:
             current = queue.popleft()
-            size += 1
             for neighbor in adjacency[current] & remaining:
                 remaining.remove(neighbor)
+                component.add(neighbor)
                 queue.append(neighbor)
-        sizes.append(size)
-    return sorted(sizes, reverse=True)
+        components.append(component)
+    return sorted(components, key=lambda values: (-len(values), sorted(values)))
+
+
+def build_connected_submap_selection(
+    keyframes: Mapping[str, Mapping[str, Any]],
+    geometry: Iterable[Mapping[str, Any]],
+    *,
+    allowed_keyframes: set[str],
+    required_videos: set[str],
+    minimum_images_per_video: int,
+    profile: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Keep the deterministic largest VERIFIED component for an isolated submap."""
+
+    if minimum_images_per_video < 1:
+        raise ValueError("minimum_images_per_video must be positive")
+    unknown = allowed_keyframes - set(keyframes)
+    if unknown:
+        raise ValueError(f"unknown keyframes: {sorted(unknown)}")
+    rows = [
+        dict(row)
+        for row in geometry
+        if row.get("admission") == "VERIFIED"
+        and str(row.get("image_i")) in allowed_keyframes
+        and str(row.get("image_j")) in allowed_keyframes
+    ]
+    components = _connected_components(set(allowed_keyframes), rows)
+    if not components:
+        raise ValueError("submap selection has no keyframes")
+    selected = components[0]
+    video_counts: dict[str, int] = defaultdict(int)
+    for keyframe_id in selected:
+        video_counts[keyframe_id.split(":", 1)[0]] += 1
+    missing = sorted(
+        video
+        for video in required_videos
+        if video_counts.get(video, 0) < minimum_images_per_video
+    )
+    if missing:
+        raise ValueError(f"largest submap component lacks required video support: {missing}")
+    admitted = [
+        row
+        for row in rows
+        if str(row["image_i"]) in selected and str(row["image_j"]) in selected
+    ]
+    segments = sorted({str(keyframes[key]["segment_id"]) for key in selected})
+    result = {
+        "schema_version": 2,
+        "artifact_type": "SUBMAP_SELECTION",
+        "selection_profile": profile,
+        "selected_keyframes": sorted(selected),
+        "active_segments": segments,
+        "admitted_pairs": admitted,
+        "mapping_modes": {segment: "TRIANGULATE" for segment in segments},
+    }
+    receipt = {
+        "schema_version": 1,
+        "artifact_type": "CONNECTED_SUBMAP_SELECTION_RECEIPT",
+        "profile": profile,
+        "allowed_keyframes": len(allowed_keyframes),
+        "component_sizes_before": [len(component) for component in components],
+        "selected_keyframes": len(selected),
+        "admitted_pairs": len(admitted),
+        "per_video_images": dict(sorted(video_counts.items())),
+        "dropped_keyframes": sorted(allowed_keyframes - selected),
+    }
+    return result, receipt
 
 
 def rewire_selection(

@@ -23,13 +23,18 @@ from river_v4_optimizer.metrics import (
     focus_session_track_summary,
     rank_variants,
 )
+from river_v4_optimizer.sim3_audit import (
+    audit_shared_camera_sim3,
+    estimate_similarity_transform,
+    relative_pose_residual,
+)
 from river_v4_optimizer.integration import (
     OptimizationRecipe,
     build_candidate_plan,
     prunable_loser_models,
     select_winner,
 )
-from river_v4_optimizer.selection import rewire_selection
+from river_v4_optimizer.selection import build_connected_submap_selection, rewire_selection
 from river_v4_optimizer.rescue import (
     connector_quality_ok,
     maximum_triangulation_angle_deg,
@@ -122,6 +127,45 @@ def test_rewire_selection_fails_closed_if_new_selection_is_disconnected() -> Non
 
     with pytest.raises(ValueError, match="disconnected"):
         rewire_selection(selection, keyframes, [], remove=set(), add=set())
+
+
+def test_connected_submap_selection_keeps_largest_verified_component() -> None:
+    keyframes = {
+        "video-a:1": {"segment_id": "a:1"},
+        "video-a:2": {"segment_id": "a:1"},
+        "video-b:1": {"segment_id": "b:1"},
+        "video-b:2": {"segment_id": "b:1"},
+        "video-b:isolated": {"segment_id": "b:2"},
+    }
+    geometry = [
+        {"image_i": "video-a:1", "image_j": "video-a:2", "admission": "VERIFIED"},
+        {"image_i": "video-a:2", "image_j": "video-b:1", "admission": "VERIFIED"},
+        {"image_i": "video-b:1", "image_j": "video-b:2", "admission": "VERIFIED"},
+        {
+            "image_i": "video-a:1",
+            "image_j": "video-b:isolated",
+            "admission": "REJECTED",
+        },
+    ]
+
+    selection, receipt = build_connected_submap_selection(
+        keyframes,
+        geometry,
+        allowed_keyframes=set(keyframes),
+        required_videos={"video-a", "video-b"},
+        minimum_images_per_video=2,
+        profile="TEST_SUBMAP",
+    )
+
+    assert selection["selected_keyframes"] == [
+        "video-a:1",
+        "video-a:2",
+        "video-b:1",
+        "video-b:2",
+    ]
+    assert len(selection["admitted_pairs"]) == 3
+    assert receipt["component_sizes_before"] == [4, 1]
+    assert receipt["dropped_keyframes"] == ["video-b:isolated"]
 
 
 def test_analyze_model_uses_track_elements_not_unique_images(tmp_path) -> None:
@@ -440,6 +484,94 @@ def test_detector_free_planner_triangulates_a_three_video_track_from_pair_artifa
         "video-c",
     }
     assert receipt["approved_tracks"] == 1
+
+
+def test_sim3_audit_recovers_known_transform_and_holdout() -> None:
+    import numpy as np
+    from scipy.spatial.transform import Rotation
+
+    names = [f"anchor/{index:02d}.jpg" for index in range(12)]
+    source = {
+        name: np.asarray([index, index % 3, (index * 7) % 5], dtype=np.float64)
+        for index, name in enumerate(names)
+    }
+    rotation = Rotation.from_euler("xyz", [10.0, -5.0, 20.0], degrees=True).as_matrix()
+    scale = 1.7
+    translation = np.asarray([3.0, -2.0, 5.0])
+    target = {
+        name: scale * (point @ rotation.T) + translation for name, point in source.items()
+    }
+
+    transform = estimate_similarity_transform(
+        np.asarray([source[name] for name in names[3:]]),
+        np.asarray([target[name] for name in names[3:]]),
+    )
+    report = audit_shared_camera_sim3(
+        source,
+        target,
+        holdout_stride=4,
+        maximum_holdout_p90_normalized=1e-8,
+        maximum_holdout_max_normalized=1e-8,
+    )
+
+    assert transform.scale == pytest.approx(scale)
+    assert transform.rotation == pytest.approx(rotation)
+    assert transform.translation == pytest.approx(translation)
+    assert report["status"] == "PASS"
+    assert report["training_anchors"] == 9
+    assert report["holdout_anchors"] == 3
+
+
+def test_sim3_audit_uses_deterministic_ransac_to_ignore_training_outlier() -> None:
+    import numpy as np
+    from scipy.spatial.transform import Rotation
+
+    names = [f"anchor/{index:02d}.jpg" for index in range(12)]
+    source = {
+        name: np.asarray([index, index % 4, (index * 5) % 7], dtype=np.float64)
+        for index, name in enumerate(names)
+    }
+    rotation = Rotation.from_euler("xyz", [4.0, 8.0, -6.0], degrees=True).as_matrix()
+    target = {name: 1.2 * (point @ rotation.T) for name, point in source.items()}
+    target[names[1]] = target[names[1]] + np.asarray([50.0, -30.0, 20.0])
+
+    report = audit_shared_camera_sim3(
+        source,
+        target,
+        holdout_stride=4,
+        ransac_max_error_normalized=0.01,
+        maximum_holdout_p90_normalized=1e-8,
+        maximum_holdout_max_normalized=1e-8,
+    )
+
+    assert report["status"] == "PASS"
+    assert report["training_inliers"] == 8
+    assert report["training_anchors"] == 9
+
+
+def test_relative_pose_residual_is_zero_for_consistent_measurement() -> None:
+    import numpy as np
+    from scipy.spatial.transform import Rotation
+
+    rotation_i = Rotation.from_euler("z", 15.0, degrees=True).as_matrix()
+    rotation_j = Rotation.from_euler("y", -20.0, degrees=True).as_matrix()
+    center_i = np.asarray([1.0, 2.0, 3.0])
+    center_j = np.asarray([4.0, 2.5, 5.0])
+    measured_rotation = rotation_j @ rotation_i.T
+    measured_translation = rotation_i @ (center_j - center_i)
+    measured_translation /= np.linalg.norm(measured_translation)
+
+    residual = relative_pose_residual(
+        rotation_i,
+        center_i,
+        rotation_j,
+        center_j,
+        measured_rotation,
+        measured_translation,
+    )
+
+    assert residual["rotation_deg"] == pytest.approx(0.0, abs=1e-8)
+    assert residual["translation_axis_deg"] == pytest.approx(0.0, abs=1e-8)
 
 
 def test_objective_improvement_requires_weak_frame_cleanup_and_track_balance() -> None:
