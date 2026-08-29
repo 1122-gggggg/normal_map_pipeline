@@ -122,6 +122,28 @@ all canonical hashes remained unchanged. Synthetic tests independently prove
 that the write interface can append an approved three-view Point2D/Point3D
 track without moving existing geometry.
 
+## Full P117 scan and independent submap audit
+
+The forced scan was expanded to all 70 P117 keyframes against 89 P168 frames:
+6,230 pairs yielded 183 VERIFIED, four AMBIGUOUS, and 6,043 REJECTED; 56 P117
+frames had direct P168 support. A 401-image / 4,171-pair global closure created
+89 robust P168↔P117 tracks. Strict 1 px detector-free planning then injected 13
+additional tracks (13 points / 86 observations), all of which survived BA and
+filtering, raising the cross-session count to 102.
+
+The enlarged candidate was not promoted. Its robust map had 145,418 points and
+1,511,654 observations with improved reprojection p90/p99 1.747/2.403 px, but
+the 15-landmark graph remained 386+9+isolates, six images were weak, and the
+>=5-view ratio 0.612971 was below canonical 0.617616.
+
+Independent robust submaps were also built: P117+P167 (109 images) and
+P168+P167 (148 images), sharing 59 identical P167 cameras. Deterministic RANSAC
+used 44 training anchors but kept only 24 inliers. The 15 untouched holdouts had
+normalized p90 residual 0.2298 versus a 0.02 gate. Among 154 forced pairs with
+both poses, rotation/translation-axis p90 were 140.9°/79.0° and zero pairs
+passed both 15°/30° gates. The submaps are not related by a sufficiently stable
+single Sim3, so they cannot authorize fusion.
+
 ## Release boundary
 
 The selected geometry remains `MAP_GEOMETRY_READY_NO_INDEPENDENT_LOCALIZATION`.

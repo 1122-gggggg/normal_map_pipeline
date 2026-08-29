@@ -80,6 +80,16 @@ before the model is opened for writing. For a non-empty plan, preserve a
 snapshot of every existing point/track, append only approved observations, and
 verify exact point and observation deltas after serialization.
 
+If selected-frame forced matching is sparse, expand in stages and keep the
+thresholds frozen. Count how many source frames receive VERIFIED support, then
+test a global closure candidate. More verified pairs can create real tracks
+while still making the robust graph worse.
+
+For independent submap alignment, never report a Sim3 fitted and scored on the
+same anchors. Reserve deterministic shared-camera holdouts before RANSAC. A
+good training subset with a bad holdout indicates non-uniform drift, not a valid
+global alignment.
+
 ## Timestamp ≠ Base / Update
 
 Capture time does not rank `BASE_CORE` or `BASE_SUPPORT`. A later video is

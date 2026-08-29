@@ -17,6 +17,9 @@ revival.
 | P168↔P117 forced closure 0.75° | 0 cross tracks; >=5-view -0.004876; P168 -53 | Density gain did not improve track quality |
 | Canonical-dense 0.75° | +2,629 points; +31 P168 tracks; >=5-view -0.003063 | Retain shadow only until independent localization evidence |
 | Detector-free anchor injection | 82,031 essential edges; 1/2/3 px sweep; 8/8/10 pre-triangulation target-spanning clusters; 0 approved | Required P168 or P117 observation failed frozen-gauge triangulation inlier span; no write performed |
+| Full P117 6,230-pair closure | 183 VERIFIED; 89 robust P168↔P117 tracks; 145,724 points | Rejected: 386+9+isolates, six weak images, >=5-view regression |
+| Full-scan detector-free injection | 13 points / 86 observations injected; 102 P168↔P117 tracks after filter | Real injection worked, but global fragmentation and track-quality regression remained |
+| P117+P167 vs P168+P167 independent Sim3 | 59 shared P167 anchors; 24/44 RANSAC training inliers; holdout p90 0.2298 span; 0/154 pairs passed both pose gates | Submap gauges are not independently consistent enough to authorize merge |
 | Additional pose-graph optimization | Redundant with global BA and lower-fidelity objective | Do not add to offline global SfM |
 
 The current architectural gap is explicit detector-free EDM correspondence

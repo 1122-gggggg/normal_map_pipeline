@@ -143,6 +143,11 @@ pair 重建後必須實際計數跨 session 3D tracks；若仍為 0，就屬於�
 duplicate gates。空 plan 不得建立輸出 model；寫入後必須證明所有既有 points／
 tracks 不變，並逐項核對新增 points 與 observations 數量。
 
+獨立 Sim3 audit 必須用分開求解且 robust-filter 過的 submaps。共同 cameras 在
+fit 前就 deterministic 分成 training／holdout；training 用 fixed-seed RANSAC，
+但 gate 以完全未參與 fit 的 holdout p90/max 為準。只有 shared-anchor Sim3 先
+通過，跨 submap relative-pose residual 才具有合併判斷意義。
+
 ```toml
 [mapping_optimization]
 enabled = true

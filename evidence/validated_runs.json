@@ -185,5 +185,52 @@
     "output_model_created": false,
     "canonical_hashes_unchanged": true,
     "rejection_reason": "Every target-spanning cluster lost P168 or P117 from the frozen-gauge triangulation inlier set."
+  },
+  "river_v4_full_p117_scan_and_sim3": {
+    "status": "COMPLETED_NO_PROMOTION",
+    "decision": "KEEP_BALANCED_MULTIVIEW_TRIMMED_F_4PX_1DEG",
+    "full_forced_scan": {
+      "pairs": 6230,
+      "verified": 183,
+      "ambiguous": 4,
+      "rejected": 6043,
+      "p117_frames_with_verified": 56
+    },
+    "global_closure": {
+      "selected_images": 401,
+      "admitted_pairs": 4171,
+      "robust_points": 145724,
+      "robust_observations": 1515144,
+      "p168_p117_tracks": 89,
+      "component_sizes_at_15_shared_landmarks": [386, 9, 1, 1, 1, 1, 1, 1],
+      "low_observation_images": 6,
+      "track_ge5_fraction": 0.6126719003046855,
+      "objective_gate_pass": false
+    },
+    "detector_free_injection": {
+      "strict_anchor_radius_px": 1.0,
+      "planned_tracks": 13,
+      "added_points": 13,
+      "added_observations": 86,
+      "surviving_p168_p117_tracks": 102,
+      "existing_geometry_unchanged_before_ba": true,
+      "objective_gate_pass": false
+    },
+    "independent_submaps": {
+      "p117_p167_images": 109,
+      "p168_p167_images": 148,
+      "shared_p167_anchors": 59,
+      "training_anchors": 44,
+      "training_inliers": 24,
+      "holdout_anchors": 15,
+      "holdout_p90_normalized": 0.22977356967323048,
+      "holdout_gate": 0.02,
+      "forced_pairs_with_both_poses": 154,
+      "relative_rotation_p90_deg": 140.86652942920864,
+      "relative_translation_axis_p90_deg": 79.04022240834428,
+      "relative_pose_passing_both": 0,
+      "status": "FAIL_SUBMAP_GAUGE_INCONSISTENT"
+    },
+    "canonical_hashes_unchanged": true
   }
 }

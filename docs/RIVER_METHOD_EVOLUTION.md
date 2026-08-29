@@ -190,3 +190,41 @@ Useful lesson: even explicit detector-free multi-pair clustering is not enough
 when the required sessions are inconsistent in the current camera gauge. A
 fail-closed planner is valuable precisely because it prevents pair-level
 evidence from becoming unsupported 3D geometry.
+
+## 12. Full P117 scan, real injection, and independent Sim3
+
+The retrieval-blind scan was expanded from four selected P117 frames to all 70
+P117 keyframes against 89 canonical P168 frames:
+
+- 6,230 pairs
+- 183 VERIFIED (2.94%), 4 AMBIGUOUS, 6,043 REJECTED
+- 56/70 P117 frames had at least one VERIFIED P168 pair
+
+A 401-image / 4,171-pair global closure registered every image. Its dense model
+contained 238,732 points / 1,958,361 observations. The 4 px / 1 degree robust
+model retained 145,724 points / 1,515,144 observations and created 89
+P168↔P117 tracks. It still failed promotion: 386+9+isolates, six low-support
+images, and a >=5-view ratio of 0.612672 versus canonical 0.617616.
+
+The detector-free planner then consumed 183 seed pairs, 1,401 support pairs,
+and 881,822 essential-inlier match edges. At 1 px it approved 13 strict tracks.
+Real injection added 13 points / 86 observations without moving existing
+geometry; all 13 survived fixed-intrinsics BA/filter, raising P168↔P117 tracks
+from 89 to 102. The candidate nevertheless remained fragmented with the same
+six weak images and a 0.612971 >=5-view ratio, so it was not promoted.
+
+Independent audit built two separately solved robust submaps:
+
+- P117+P167: 109 images, 33,532 points, graph 58+49+1+1
+- P168+P167: 148 images, 54,780 points, one 148-image component
+- 59 identical P167 cameras were reserved as shared Sim3 anchors
+
+Deterministic RANSAC used 44 training anchors and kept only 24 inliers. The 15
+untouched P167 holdouts had normalized residual p90 0.2298, far above the 0.02
+gate. After alignment, 154 forced pairs with both poses had rotation p90 140.9°
+and translation-axis p90 79.0°; none passed both 15°/30° gates. Both submaps also
+failed independent alignment to canonical, although P168+P167 was less severe.
+
+Decision: keep the existing balanced canonical. The full scan and injection
+prove that P117/P168 support can be manufactured, but the independent submap
+audit shows it is not globally gauge-consistent enough for promotion.

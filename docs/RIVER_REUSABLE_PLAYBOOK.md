@@ -69,6 +69,17 @@ For detector-free injection, separate planning from mutation:
 - call the mutation interface only when at least one plan passes;
 - prove every pre-existing point and observation remains unchanged.
 
+When a selected-frame forced scan is inconclusive, expand in stages rather than
+changing thresholds: selected×selected → all weak-session frames×selected
+target frames → global closure candidate. Record the number of source frames
+with any VERIFIED support, not only total verified pairs.
+
+For independent Sim3, build the two submaps separately, robust-filter both, and
+reserve deterministic shared-camera holdouts before fitting. Use RANSAC on
+training anchors, then gate untouched holdout p90/max. A high inlier fit with a
+bad holdout is still a failed merge. Relative-pose pair checks are meaningful
+only after the shared-anchor Sim3 itself passes.
+
 ## Promotion gate
 
 A candidate may replace canonical only when all required checks pass:
