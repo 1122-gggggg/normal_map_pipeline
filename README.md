@@ -16,6 +16,10 @@
 
 River V4 的 weak-frame cleanup、balanced multi-view selection、objective gates
 與精確結果見 [`docs/RIVER_V4_BALANCED_MULTIVIEW.md`](docs/RIVER_V4_BALANCED_MULTIVIEW.md)。
+完整方法演進、可重用 playbook 與拒絕實驗分別見
+[`RIVER_METHOD_EVOLUTION.md`](docs/RIVER_METHOD_EVOLUTION.md)、
+[`RIVER_REUSABLE_PLAYBOOK.md`](docs/RIVER_REUSABLE_PLAYBOOK.md) 與
+[`RIVER_REJECTED_EXPERIMENTS.md`](docs/RIVER_REJECTED_EXPERIMENTS.md)。
 
 ```bash
 uv sync --all-extras --group dev

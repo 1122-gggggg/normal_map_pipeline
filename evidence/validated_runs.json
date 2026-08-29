@@ -128,5 +128,46 @@
     },
     "objective_gate_pass": true,
     "localization_status": "NO_INDEPENDENT_HOLDOUT_P168_IS_MAPPING_DATA"
+  },
+  "river_v4_forced_p117_and_filter_ab": {
+    "status": "COMPLETED_NO_PROMOTION",
+    "decision": "KEEP_BALANCED_MULTIVIEW_TRIMMED_F_4PX_1DEG",
+    "forced_edm": {
+      "p168_images": 89,
+      "p117_images": 4,
+      "candidate_pairs": 356,
+      "verified_pairs": 6,
+      "ambiguous_pairs": 1,
+      "rejected_pairs": 349,
+      "verified_rate": 0.016853932584269662,
+      "dense_p168_p117_tracks": 0,
+      "robust_p168_p117_tracks": 0
+    },
+    "closure_f_4px_1deg": {
+      "points": 123623,
+      "observations": 1296748,
+      "track_ge5_fraction": 0.6148694013249961,
+      "p168_cross_session_tracks": 10147,
+      "component_sizes_at_15_shared_landmarks": [346, 1],
+      "objective_gate_pass": false
+    },
+    "closure_f_4px_0p75deg": {
+      "points": 125967,
+      "observations": 1310450,
+      "track_ge5_fraction": 0.6127398445624648,
+      "p168_cross_session_tracks": 10179,
+      "component_sizes_at_15_shared_landmarks": [347],
+      "objective_gate_pass": false
+    },
+    "canonical_dense_f_4px_0p75deg_trimmed": {
+      "points": 125924,
+      "observations": 1317336,
+      "track_ge5_fraction": 0.6145532225786983,
+      "p168_cross_session_tracks": 10263,
+      "component_sizes_at_15_shared_landmarks": [347],
+      "objective_gate_pass": false,
+      "retention": "SHADOW_DENSITY_CANDIDATE_ONLY"
+    },
+    "architectural_finding": "Stage-12 pair admission does not inject detector-free EDM correspondences into the GlueMap track database."
   }
 }

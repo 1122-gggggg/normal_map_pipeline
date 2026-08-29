@@ -63,6 +63,18 @@ Retrieval proposes pairs. Before any merge or base extension:
 No independent model ⇒ no Sim3 ⇒ no merge. Fail closed. `map_fusion`
 stays unauthorized until those gates pass; even then Stage 0 only *advises*.
 
+## Pair admission ≠ correspondence or track injection
+
+A geometry verifier can authorize an image pair without changing the mapper's
+feature identity or track database. If the mapper recomputes correspondences
+with a different frontend, adding a VERIFIED pair to the pair list may still
+produce zero shared 3D tracks.
+
+After any retrieval-blind or forced-pair repair, measure the resulting dense
+and robust cross-session tracks. Detector-free correspondence injection is a
+separate architectural seam that needs anchor identity, conflict handling,
+third-view confirmation, fixed-gauge checks, and regression tests.
+
 ## Timestamp ≠ Base / Update
 
 Capture time does not rank `BASE_CORE` or `BASE_SUPPORT`. A later video is

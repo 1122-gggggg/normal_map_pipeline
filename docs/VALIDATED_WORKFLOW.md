@@ -132,6 +132,11 @@ rewire 與選用的 fixed-pose retriangulation；只有通過 geometry gate 的�
 artifacts，不重新調 matching threshold。若固定內參需依原始影像解析度縮放，
 Stage-12 optimizer request 必須包含 `inputs/corpus_manifest.json`。
 
+注意：EDM `VERIFIED` pair 在這個 seam 只是 admitted edge。現行 GlueMap worker
+不會把 EDM detector-free correspondences 注入 GlueMap track database。forced
+pair 重建後必須實際計數跨 session 3D tracks；若仍為 0，就屬於失敗的 closure，
+不得因 pair admission 本身而宣稱地圖已補強。
+
 ```toml
 [mapping_optimization]
 enabled = true

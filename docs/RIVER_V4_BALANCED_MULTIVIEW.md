@@ -77,6 +77,30 @@ P157 62→1,026, and P120 3→481 tracks. P117 has no direct admitted P168 pair 
 the frozen geometry, but its retained four images now have at least 317
 observations instead of the former one-observation image.
 
+## Follow-up: forced P168↔P117 and 0.75-degree A/B
+
+An exact retrieval-blind batch evaluated all 89 selected P168 images against
+the four selected P117 images. Frozen EDM admitted 6/356 pairs (1.685%), marked
+one ambiguous, and rejected 349. The six VERIFIED pairs were added to a
+3,435-pair closure rebuild.
+
+This did not produce a single P168↔P117 3D track in dense, 1-degree robust, or
+0.75-degree robust geometry. Current Stage 12 uses EDM as pair-admission
+evidence; it does not inject EDM's detector-free correspondences into GlueMap's
+track database. Pair-list admission alone therefore did not close the tracks.
+
+| Variant | Points | Observations | >=5-view ratio | P168 tracks | Components | Decision |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| Canonical 1° | 123,295 | 1,302,405 | 0.617616 | 10,232 | 347 | KEEP |
+| Forced closure 1° | 123,623 | 1,296,748 | 0.614869 | 10,147 | 346+1 | REJECT |
+| Forced closure 0.75° | 125,967 | 1,310,450 | 0.612740 | 10,179 | 347 | REJECT |
+| Canonical dense 0.75° + cleanup | 125,924 | 1,317,336 | 0.614553 | 10,263 | 347 | SHADOW ONLY |
+
+The clean 0.75-degree A/B gained 2,629 points, 14,931 observations, and 31
+P168 cross-session tracks, but reduced the >=5-view ratio by 0.003063. Without
+an independent localization holdout, that density trade-off is not promoted.
+The canonical model and checksums remain unchanged.
+
 ## Release boundary
 
 The selected geometry remains `MAP_GEOMETRY_READY_NO_INDEPENDENT_LOCALIZATION`.

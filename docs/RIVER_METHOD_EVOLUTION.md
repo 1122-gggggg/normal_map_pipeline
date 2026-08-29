@@ -1,0 +1,165 @@
+# River method evolution
+
+## 1. Early graph-aware V3: registration was not connectivity
+
+The early 292-image build registered 292/292 images but retained only 1,732 of
+14,870 available VERIFIED pairs. After robust filtering, its 15-landmark graph
+had 19 components, a 118/292 main component, and 13 isolates.
+
+Useful lesson: image registration and pair-graph connectivity are insufficient.
+Promotion must inspect the post-filter shared-landmark graph and multi-view
+tracks. Over-pruning pair evidence can destroy cross-session tracks even when
+every camera obtains a pose.
+
+## 2. All-seven-video V3: first stable retained geometry
+
+Input conversion:
+
+- 1,358 candidate frames → 1,356 sanitized frames → 977 keyframes
+- 43,234 retrieval candidates → 21,479 unique EDM pairs
+- 14,870 VERIFIED pairs → 450 final images / 4,598 admitted pairs
+
+Robust V3 retained 167,961 points and 1,809,867 observations with reprojection
+p90 1.471 px and a 448+1+1 graph. Dense V3 contained 308,849 points but had
+reprojection p90 5.670 px, so it remained localization-hypothesis-only.
+
+Useful lesson: dense point count is not a base-map quality metric. Keep robust
+base geometry and dense localization hypotheses separate.
+
+## 3. P168 provisional outer evidence
+
+The original P168 file has a corrupt AVC tail. Only 62 unique queries from
+0--122 seconds were admitted. Under the frozen localizer:
+
+- V3 robust: 3/62 strict successes
+- V3 dense: 6/62
+- V3 canonical dual-layer: 3/62
+- historical V8 robust/dense: 0/62
+
+All layers produced 62/62 PnP poses; failure was trustworthy, spatially
+distributed 2D→3D/inlier support, not PnP availability. Once P168 informed map
+changes, it became development/mapping evidence and could no longer authorize a
+successor.
+
+Useful lesson: freeze localization thresholds and distinguish “pose solved”
+from “strict pose accepted.” Never tune a claimed outer holdout after reading it.
+
+## 4. V8 retirement
+
+V8 used P118+P119+P120, registered 255 images, retained 222,241 dense / 129,355
+robust points, and achieved 0/62 strict P168 successes. It was explicitly and
+permanently deleted on 2026-08-28; only summaries and validation receipts remain.
+
+Useful lesson: do not infer localization coverage from clean geometry over a
+small subset of sessions. Deleted V8 paths are historical provenance, not
+re-runnable inputs.
+
+## 5. MoGe-3 assistance: useful diagnostic, no promotion
+
+Four fixed-450 candidates tested depth-assisted pair audit, pre-BA filtering,
+and low-parallax initialization. Pair audit removed 19 VERIFIED edges but did
+not add strict successes; pre-BA filtering regressed weak support and hit the
+BA iteration limit; low-parallax initialization reduced support/points.
+
+Decision: `NO_MOGE_PROMOTION`. Retain MoGe-3 only as an offline diagnostic
+idea, not an active River mapping stage.
+
+## 6. V4 all-eight-video rebuild
+
+The valid P168 prefix was intentionally reclassified as mapping data. V4 input
+conversion was:
+
+- 8 sources
+- 1,600 sanitized frames
+- 1,157 keyframes / 65 segments
+- 50,838 retrieval rows
+- 25,237 unique EDM-evaluated pairs
+- 17,671 VERIFIED pairs (70.02%)
+
+The first 338-image robust build registered every selected image but failed the
+connectivity gate: 308+14+3+isolates, 91.12% main-component ratio, two
+articulations, and one bridge.
+
+Useful lesson: the binding issue was selection/track topology, not frontend
+pair verification or camera registration.
+
+## 7. Connector-rewire optimization
+
+Seventeen variants compared robust thresholds, fixed-pose retriangulation,
+connector rescue, and selection rewire. The first passing winner was
+`selection_rewire_f_4px_1deg`:
+
+- 341/341 images, 3,241 pairs
+- 120,068 points / 1,254,440 observations
+- 339+1+1 at 15 landmarks; no articulation or bridge
+- P168 9,331 cross-session tracks
+- reprojection p90/p99 1.768/2.420 px
+
+The 0.75-degree sibling added roughly 3% points but was not selected because
+the 1-degree version had the preferred error/geometry trade-off.
+
+## 8. Weak-frame and balanced multi-view reinforcement
+
+Two weak canonical images were identified: P119 frame 1464 (9 observations)
+and P117 frame 792 (1 observation).
+
+The remove-only counterfactual failed. A full rebuild after deleting only those
+images created 13 new P119 weak images, reduced the main component to 326/339,
+reduced the >=5-view ratio by 0.01190, and lost 99 P168 cross-session tracks.
+
+The successful balanced selection removed the two weak images and added eleven
+existing high-quality connector frames from P116, P117, P120, and P157. After
+global GlueMap and the same 4 px / 1 degree fixed-intrinsics filter, three
+zero-observation poses were deregistered with byte-identical camera/point/rig
+geometry. The promoted result was:
+
+- 347/347 in one component, 3,429 admitted pairs
+- 123,295 points / 1,302,405 observations
+- no weak or isolated image
+- >=5-view ratio 0.617616 (+0.004322)
+- P168 cross-session tracks 10,232 (+901)
+- P168–P116 1,013, P168–P157 1,026, P168–P120 481
+- P168 dominant-session share 0.747948 (down from 0.770014)
+
+Useful lesson: weak images cannot be deleted in isolation when they sit inside a
+global solve. Replace their support with balanced connector evidence, then
+rebuild and gate the complete robust graph.
+
+## 9. P168↔P117 retrieval-blind forced matching and closure
+
+The canonical retrieval artifacts contained zero P168↔P117 candidate pairs.
+An exact 89×4 forced batch evaluated 356 pairs with the frozen EDM config:
+
+- 6 VERIFIED (1.685%)
+- 1 AMBIGUOUS
+- 349 REJECTED
+
+The six pairs were added to the 3,429-pair selection, producing a 3,435-pair
+global rebuild. However, dense, 1-degree robust, and 0.75-degree robust models
+all contained zero P168↔P117 3D tracks. Current Stage 12 consumes EDM as pair
+admission but does not inject detector-free EDM correspondences into GlueMap's
+track database; GlueMap's own track formation did not reproduce those links.
+
+Both closure variants failed objective gates. The 1-degree model created a
+346+1 graph and lost 85 P168 tracks. The 0.75-degree closure model was connected
+and denser but reduced the >=5-view ratio by 0.004876 and lost 53 P168 tracks.
+
+Useful lesson: a VERIFIED pair is not automatically a surviving multi-view
+track. Detector-free correspondence injection is a separate architectural seam
+and must not be approximated by pair-list admission alone.
+
+## 10. Canonical-dense 0.75-degree A/B
+
+A clean A/B from the retained balanced dense model produced, after exact
+zero-observation cleanup:
+
+- 125,924 points (+2,629)
+- 1,317,336 observations (+14,931)
+- one 347-image component and no weak image
+- P168 cross-session tracks 10,263 (+31)
+- >=5-view ratio 0.614553 (-0.003063)
+- reprojection p90/p99 1.787/2.441 px
+
+Decision: retain as a shadow density candidate, but do not promote. Without a
+new independent holdout, the point-count gain does not justify lower multi-view
+support.
