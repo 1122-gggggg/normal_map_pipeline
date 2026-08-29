@@ -169,5 +169,21 @@
       "retention": "SHADOW_DENSITY_CANDIDATE_ONLY"
     },
     "architectural_finding": "Stage-12 pair admission does not inject detector-free EDM correspondences into the GlueMap track database."
+  },
+  "river_v4_detector_free_injection": {
+    "status": "COMPLETED_NO_INJECTION",
+    "decision": "KEEP_CANONICAL_NO_ADMISSIBLE_TRACKS",
+    "implementation": "fail-closed plan_detector_free_tracks + inject_planned_tracks interfaces",
+    "seed_verified_pairs": 6,
+    "support_verified_pairs": 120,
+    "essential_match_edges": 82031,
+    "anchor_radius_sweep_px": [1.0, 2.0, 3.0],
+    "clustered_tracks": [48758, 47084, 44641],
+    "required_session_third_video_clusters": [8, 8, 10],
+    "approved_tracks": [0, 0, 0],
+    "injection_called": false,
+    "output_model_created": false,
+    "canonical_hashes_unchanged": true,
+    "rejection_reason": "Every target-spanning cluster lost P168 or P117 from the frozen-gauge triangulation inlier set."
   }
 }

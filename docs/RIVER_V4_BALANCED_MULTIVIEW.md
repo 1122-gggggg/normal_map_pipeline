@@ -101,6 +101,27 @@ P168 cross-session tracks, but reduced the >=5-view ratio by 0.003063. Without
 an independent localization holdout, that density trade-off is not promoted.
 The canonical model and checksums remain unchanged.
 
+## Detector-free track injection audit
+
+A fail-closed detector-free injection module now separates planning from model
+mutation. Planning clusters EDM anchors across pair artifacts, rejects excessive
+same-image spread, requires P168 + P117 + an independent third video, then
+triangulates in the frozen COLMAP camera gauge. Required sessions must remain
+inside the triangulation inlier set, and reprojection, angle, existing-point
+conflict, duplicate-image, and duplicate-track gates must all pass.
+
+The real plan used 6 VERIFIED seed pairs, 120 support pairs, and 82,031
+essential-inlier match edges. Anchor-radius sweeps at 1/2/3 px produced
+48,758/47,084/44,641 clustered tracks. Eight/eight/ten clusters initially
+spanned the two required sessions plus a third video, but every frozen-pose
+triangulation dropped either P168 or P117 from its inlier set. Approved tracks
+were therefore 0/0/0.
+
+The injection interface was not called, no candidate model was written, and
+all canonical hashes remained unchanged. Synthetic tests independently prove
+that the write interface can append an approved three-view Point2D/Point3D
+track without moving existing geometry.
+
 ## Release boundary
 
 The selected geometry remains `MAP_GEOMETRY_READY_NO_INDEPENDENT_LOCALIZATION`.

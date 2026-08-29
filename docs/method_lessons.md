@@ -75,6 +75,11 @@ and robust cross-session tracks. Detector-free correspondence injection is a
 separate architectural seam that needs anchor identity, conflict handling,
 third-view confirmation, fixed-gauge checks, and regression tests.
 
+Keep planning and mutation as separate interfaces. An empty plan must fail
+before the model is opened for writing. For a non-empty plan, preserve a
+snapshot of every existing point/track, append only approved observations, and
+verify exact point and observation deltas after serialization.
+
 ## Timestamp ≠ Base / Update
 
 Capture time does not rank `BASE_CORE` or `BASE_SUPPORT`. A later video is

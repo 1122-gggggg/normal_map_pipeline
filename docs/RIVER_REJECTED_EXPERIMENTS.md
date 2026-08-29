@@ -16,6 +16,7 @@ revival.
 | P168↔P117 forced closure 1° | 0 cross tracks; 346+1; P168 -85 | Pair admission did not inject EDM tracks |
 | P168↔P117 forced closure 0.75° | 0 cross tracks; >=5-view -0.004876; P168 -53 | Density gain did not improve track quality |
 | Canonical-dense 0.75° | +2,629 points; +31 P168 tracks; >=5-view -0.003063 | Retain shadow only until independent localization evidence |
+| Detector-free anchor injection | 82,031 essential edges; 1/2/3 px sweep; 8/8/10 pre-triangulation target-spanning clusters; 0 approved | Required P168 or P117 observation failed frozen-gauge triangulation inlier span; no write performed |
 | Additional pose-graph optimization | Redundant with global BA and lower-fidelity objective | Do not add to offline global SfM |
 
 The current architectural gap is explicit detector-free EDM correspondence

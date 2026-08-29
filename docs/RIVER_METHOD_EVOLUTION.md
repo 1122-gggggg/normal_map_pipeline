@@ -163,3 +163,30 @@ zero-observation cleanup:
 Decision: retain as a shadow density candidate, but do not promote. Without a
 new independent holdout, the point-count gain does not justify lower multi-view
 support.
+
+## 11. Fail-closed detector-free track injection
+
+A dedicated deep module was implemented with two interfaces:
+
+1. `plan_detector_free_tracks`: cluster EDM pixel anchors across pairs, require
+   P168 + P117 + a third video, triangulate in the frozen COLMAP gauge, and
+   enforce required-video inliers, reprojection, angle, anchor-spread, existing
+   observation-conflict, and duplicate-track gates.
+2. `inject_planned_tracks`: append Point2D/Point3D objects only for an approved
+   >=3-view plan while proving existing point geometry unchanged. Empty plans
+   fail before opening or writing a model.
+
+The real audit used 6 VERIFIED P168↔P117 seed pairs, 120 supporting VERIFIED
+pairs incident to their endpoints, and 82,031 essential-inlier match edges.
+Anchor radii 1/2/3 px produced 48,758 / 47,084 / 44,641 clustered tracks. Eight,
+eight, and ten clusters respectively spanned P168, P117, and a third video
+before triangulation. In every case, the frozen-pose triangulation inlier set
+dropped either P168 or P117. Approved tracks were 0/0/0.
+
+Decision: `COMPLETED_NO_INJECTION`. The write interface was not called, no
+candidate model was created, and all canonical hashes remained unchanged.
+
+Useful lesson: even explicit detector-free multi-pair clustering is not enough
+when the required sessions are inconsistent in the current camera gauge. A
+fail-closed planner is valuable precisely because it prevents pair-level
+evidence from becoming unsupported 3D geometry.

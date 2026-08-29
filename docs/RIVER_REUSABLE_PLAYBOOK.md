@@ -57,6 +57,18 @@ entire corpus when the loss is downstream track formation or robust filtering.
 - After rebuild, count actual cross-session 3D tracks. Pair admission without
   track survival is a failed experiment, not a map improvement.
 
+For detector-free injection, separate planning from mutation:
+
+- cluster same-image anchors across independently inferred pairs;
+- reject transitive clusters whose per-image anchor spread exceeds the cap;
+- require the target two sessions plus an independent third video;
+- triangulate in frozen camera poses and require all target sessions to remain
+  in the triangulation inlier set;
+- check reprojection p90/max, triangulation angle, existing-observation
+  conflicts, and duplicate tracks;
+- call the mutation interface only when at least one plan passes;
+- prove every pre-existing point and observation remains unchanged.
+
 ## Promotion gate
 
 A candidate may replace canonical only when all required checks pass:

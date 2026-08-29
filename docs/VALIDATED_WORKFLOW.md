@@ -137,6 +137,12 @@ Stage-12 optimizer request 必須包含 `inputs/corpus_manifest.json`。
 pair 重建後必須實際計數跨 session 3D tracks；若仍為 0，就屬於失敗的 closure，
 不得因 pair admission 本身而宣稱地圖已補強。
 
+若啟用 detector-free track injection，必須先只讀產生 plan。Plan 至少需要
+三視角、P168/P117 等指定 sessions 都留在 frozen-gauge triangulation inliers，
+且通過 anchor spread、reprojection、angle、existing-observation conflict 與
+duplicate gates。空 plan 不得建立輸出 model；寫入後必須證明所有既有 points／
+tracks 不變，並逐項核對新增 points 與 observations 數量。
+
 ```toml
 [mapping_optimization]
 enabled = true
