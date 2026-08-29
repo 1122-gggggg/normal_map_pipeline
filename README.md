@@ -6,12 +6,16 @@
 
 - **2026-08-26 development validation**：753 張 mapping images、6,881 組 exact `VERIFIED` pairs；robust／dense dual-layer strict localization 631/789（79.97%）。該 789-query set 已反覆用於開發，不能當 unbiased release score。
 - **2026-08-27 river geometry validation**：七支影片、450 張 final images、4,598 pairs；robust map 167,961 points／1,809,867 observations、reprojection p90 1.471 px、track≥3 = 100%、QA A/100。所有既有 river videos 均參與 mapping-time selection，定位仍等待全新 outer holdout。
+- **2026-08-29 River V4 optimization**：八支影片（含 P168 0--122 秒 mapping clip）、347/347 單一連通群、123,295 points／1,302,405 observations；P168 cross-session tracks 9,331→10,232，弱影格 2→0。P168 已進圖，仍不得視為 outer-holdout 驗證。
 
 機器可讀摘要：[`evidence/validated_runs.json`](evidence/validated_runs.json)。
 
 ## 完整流程
 
 [`docs/VALIDATED_WORKFLOW.md`](docs/VALIDATED_WORKFLOW.md) 包含從 immutable corpus、adaptive keyframes、SALAD retrieval、EDM geometry、GlueMap、bridge repair、fixed-intrinsics robust BA、dual-layer localization 到 publish gate 的逐步命令。
+
+River V4 的 weak-frame cleanup、balanced multi-view selection、objective gates
+與精確結果見 [`docs/RIVER_V4_BALANCED_MULTIVIEW.md`](docs/RIVER_V4_BALANCED_MULTIVIEW.md)。
 
 ```bash
 uv sync --all-extras --group dev
@@ -49,6 +53,7 @@ River map-only risk 產物實際使用：
 | CLI | 用途 |
 | --- | --- |
 | `site-sfm-pipeline` | 16-stage graph-aware lifecycle、selection repair、robust/dense release、dual-layer validation |
+| `river-v4-optimize` | fixed-intrinsics filter、connector rewire/rescue、track-balance metrics、zero-observation cleanup |
 | `sfm-qa` | map screen、session selection、post-build diagnosis |
 | `mapdoctor` | graph fragility、risk calibration、risk–coverage audit |
 | `edm-risk-diagnosis` | virtual-pose FIM／ActLoc-optional／EDM-risk diagnosis |

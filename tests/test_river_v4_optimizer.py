@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from river_v4_optimizer.adapter import _mapper_request
+from river_v4_optimizer.cleanup import prune_observation_free_registered_images
 from river_v4_optimizer.metrics import (
     component_summary,
     evaluate_objective_improvement,
@@ -221,6 +222,37 @@ def test_track_length_counts_every_track_element() -> None:
         track = Track()
 
     assert _track_length(Point()) == 3
+
+
+def test_prune_observation_free_images_preserves_all_geometry(tmp_path) -> None:
+    import pycolmap
+
+    options = pycolmap.SyntheticDatasetOptions()
+    options.num_rigs = 2
+    options.num_frames_per_rig = 3
+    options.num_points3D = 40
+    options.track_length = 5
+    reconstruction = pycolmap.synthesize_dataset(options)
+    image = next(iter(reconstruction.images.values()))
+    for point2d_idx in list(image.get_observation_point2D_idxs()):
+        reconstruction.delete_observation(image.image_id, point2d_idx)
+    assert image.has_pose
+    assert image.num_points3D == 0
+    input_model = tmp_path / "input"
+    output_model = tmp_path / "output"
+    input_model.mkdir()
+    reconstruction.write(input_model)
+    points_before = reconstruction.num_points3D()
+    observations_before = reconstruction.compute_num_observations()
+
+    receipt = prune_observation_free_registered_images(input_model, output_model)
+    cleaned = pycolmap.Reconstruction(output_model)
+
+    assert receipt["removed_images"] == [image.name]
+    assert receipt["geometry_unchanged"] is True
+    assert cleaned.num_reg_images() == reconstruction.num_reg_images() - 1
+    assert cleaned.num_points3D() == points_before
+    assert cleaned.compute_num_observations() == observations_before
 
 
 def test_connector_quality_requires_multicomponent_clean_multiview_track() -> None:

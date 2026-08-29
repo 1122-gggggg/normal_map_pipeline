@@ -1,0 +1,25 @@
+# Merge this overlay into river_graph_aware_v3.validated.toml after replacing
+# every /CHANGE_ME/ path. The exact frame IDs are River-corpus specific.
+
+[mapping_optimization]
+enabled = true
+required_methods = ["robust_filter_sweep", "connectivity_aware_rescue", "connector_frame_rewire"]
+connectivity_rescue = true
+cleanup_losers = false
+require_geometry_gate = true
+
+filter_variants = [
+  { name = "f_4px_1deg", max_reprojection_error_px = 4.0, minimum_triangulation_angle_deg = 1.0 },
+]
+
+selection_rewires = [
+  { name = "balanced_multiview", remove = ["vid_600bbf70227311ca:00001464", "vid_d321e99793a92bb6:00000792"], add = ["vid_d321e99793a92bb6:00000264", "vid_d321e99793a92bb6:00000768", "vid_8368de51fcbc5376:00001092", "vid_8368de51fcbc5376:00001116", "vid_8368de51fcbc5376:00001164", "vid_aff09c4c80bec228:00002232", "vid_aff09c4c80bec228:00002400", "vid_aff09c4c80bec228:00002412", "vid_931611d6ff4f0361:00000240", "vid_931611d6ff4f0361:00000264", "vid_931611d6ff4f0361:00002520"] },
+]
+
+[adapters.mapping_optimizer]
+command = ["/CHANGE_ME/gluemap-python", "-m", "river_v4_optimizer.adapter"]
+resource_class = "ba"
+timeout_seconds = 14400
+
+[adapters.mapping_optimizer.env]
+PYTHONPATH = "/CHANGE_ME/normal_map_pipeline/src"

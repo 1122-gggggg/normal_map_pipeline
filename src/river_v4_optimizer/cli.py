@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .metrics import analyze_model
+from .cleanup import prune_observation_free_registered_images
 from .runner import atomic_json, retriangulate_fixed_poses, run_filter_sweep
 from .rescue import rescue_connectors
 from .selection import rewire_selection
@@ -41,6 +42,10 @@ def main() -> None:
     rescue.add_argument("--base-model", type=Path, required=True)
     rescue.add_argument("--output-model", type=Path, required=True)
 
+    prune = commands.add_parser("prune-observation-free")
+    prune.add_argument("--input-model", type=Path, required=True)
+    prune.add_argument("--output-model", type=Path, required=True)
+
     args = parser.parse_args()
     if args.command == "sweep":
         result = run_filter_sweep(args.input_model, args.output_root)
@@ -61,6 +66,11 @@ def main() -> None:
             dense_model=args.dense_model,
             base_model=args.base_model,
             output_model=args.output_model,
+        )
+    elif args.command == "prune-observation-free":
+        result = prune_observation_free_registered_images(
+            args.input_model,
+            args.output_model,
         )
     else:
         run = args.run.resolve(strict=True)

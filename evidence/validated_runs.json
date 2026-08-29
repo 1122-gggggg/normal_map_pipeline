@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "evidence_date": "2026-08-27",
-  "method_profile": "graph_aware_v3_robust_dense_ensemble",
+  "evidence_date": "2026-08-29",
+  "method_profile": "graph_aware_v4_balanced_multiview",
   "development_validation": {
     "source_run": "graph_aware_v3_balanced_robust_20260826",
     "selection": {
@@ -85,5 +85,48 @@
       "failure_probability": "uncalibrated_unknown"
     },
     "localization_status": "PENDING_NEW_OUTER_HOLDOUT_VIDEO"
+  },
+  "river_v4_objective_optimization": {
+    "source_run": "river_graph_aware_v4_all8_rebuild_20260829",
+    "input_videos": 8,
+    "p168_role": "MAPPING_VALID_PREFIX_0_TO_122_SECONDS",
+    "selected_variant": "balanced_multiview_trimmed_f_4px_1deg",
+    "final_selection": {
+      "registered_images": 347,
+      "selected_images": 347,
+      "admitted_pairs": 3429,
+      "component_sizes_at_15_shared_landmarks": [347],
+      "low_observation_images": 0,
+      "articulation_images": 0,
+      "bridge_edges": 0
+    },
+    "robust_map": {
+      "points": 123295,
+      "observations": 1302405,
+      "track_length_p50": 6.0,
+      "track_length_p90": 19.0,
+      "track_ge5_fraction": 0.6176162861429904,
+      "reprojection_p90_px": 1.7790612882285834,
+      "reprojection_p99_px": 2.4292460895941073,
+      "fixed_intrinsics": true,
+      "bundle_adjustment_termination": "CONVERGENCE"
+    },
+    "p168_cross_session": {
+      "tracks": 10232,
+      "delta_tracks": 901,
+      "connected_existing_sessions": 6,
+      "dominant_video": "P167",
+      "dominant_share": 0.7479476153244723,
+      "baseline_dominant_share": 0.7700139320544421,
+      "tracks_to_p116": 1013,
+      "tracks_to_p157": 1026,
+      "tracks_to_p120": 481
+    },
+    "cleanup": {
+      "observation_free_registered_images_removed": 3,
+      "camera_point_rig_binaries_unchanged": true
+    },
+    "objective_gate_pass": true,
+    "localization_status": "NO_INDEPENDENT_HOLDOUT_P168_IS_MAPPING_DATA"
   }
 }

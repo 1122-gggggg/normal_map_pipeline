@@ -120,6 +120,40 @@ site-sfm-pipeline enrich-bridge \
 
 之後重新 approval、Stage 12、`materialize-layers`、Stage 13。River run 的最終 repair 證據：7 個新增 frame、680 條橫跨原 components 的三視圖 tracks，任一新增 frame leave-one-out 後仍連通。
 
+### 5.1 Stage-12 connectivity-first optimization
+
+當 final dense model 已完整註冊、但 robust filter 後仍有弱影格、孤立影格或
+跨場次 tracks 過度集中時，可啟用 `mapping_optimization`。它在獨立 candidate
+目錄依序比較 fixed-intrinsics filter、quality-gated connector rescue、selection
+rewire 與選用的 fixed-pose retriangulation；只有通過 geometry gate 的候選才可
+成為 Stage 12 final model。
+
+`connector_frame_rewire` 只消費已存在的 `VERIFIED` pair geometry 與 EDM match
+artifacts，不重新調 matching threshold。若固定內參需依原始影像解析度縮放，
+Stage-12 optimizer request 必須包含 `inputs/corpus_manifest.json`。
+
+```toml
+[mapping_optimization]
+enabled = true
+required_methods = ["robust_filter_sweep", "connectivity_aware_rescue", "connector_frame_rewire"]
+cleanup_losers = false
+
+[adapters.mapping_optimizer]
+command = ["/opt/gluemap/bin/python", "-m", "river_v4_optimizer.adapter"]
+resource_class = "ba"
+```
+
+完整 River V4 mutation 與結果見
+[`RIVER_V4_BALANCED_MULTIVIEW.md`](RIVER_V4_BALANCED_MULTIVIEW.md)。robust filter
+之後只允許移除 `num_points3D == 0` 的 registered images，且必須證明 camera、
+point 與 rig binaries 不變：
+
+```bash
+river-v4-optimize prune-observation-free \
+  --input-model candidate/filter/model \
+  --output-model candidate/trimmed/model
+```
+
 ## 6. Strict robust／dense localization
 
 先把完全未參與任何 mapping-time 決策的新影片登記為 outer holdout，並在 recipe 的 `adapters.localizer.query_manifest`／`provider_kwargs.query_manifest` 指向 immutable query manifest。兩層共用：

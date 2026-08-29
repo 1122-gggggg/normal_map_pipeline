@@ -6,6 +6,7 @@ from .integration import (
     prunable_loser_models,
     select_winner,
 )
+from .cleanup import prune_observation_free_registered_images
 from .metrics import (
     analyze_model,
     component_summary,
@@ -23,6 +24,7 @@ __all__ = [
     "evaluate_objective_improvement",
     "focus_session_track_summary",
     "prunable_loser_models",
+    "prune_observation_free_registered_images",
     "rank_variants",
     "rewire_selection",
     "select_winner",
