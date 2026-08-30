@@ -98,6 +98,28 @@ def _path_to_other_video(
     return ()
 
 
+def _multihop_context(
+    source: str,
+    graph: Mapping[str, Sequence[tuple[str, float]]],
+    *,
+    maximum_hops: int,
+) -> tuple[str, ...]:
+    queue: deque[tuple[str, int]] = deque([(source, 0)])
+    visited = {source}
+    context: list[str] = []
+    while queue:
+        node, depth = queue.popleft()
+        if depth >= maximum_hops:
+            continue
+        for neighbor, _ in graph.get(node, ()):
+            if neighbor in visited:
+                continue
+            visited.add(neighbor)
+            context.append(neighbor)
+            queue.append((neighbor, depth + 1))
+    return tuple(context)
+
+
 def _targets_for_source(
     source: str,
     graph: Mapping[str, Sequence[tuple[str, float]]],
@@ -115,7 +137,8 @@ def _targets_for_source(
             source, graph, maximum_hops=config.maximum_bridge_hops
         )
         selected.extend(rationale_path)
-    for candidate in (*same, *(name for name, _ in neighbors), *rationale_path):
+    context = _multihop_context(source, graph, maximum_hops=config.maximum_bridge_hops)
+    for candidate in (*same, *context, *(name for name, _ in neighbors), *rationale_path):
         if candidate != source and candidate not in selected:
             selected.append(candidate)
         if len(selected) >= config.targets_per_source:

@@ -61,6 +61,40 @@ def test_targeted_groups_use_sparse_sessions_and_bridge_weak_sources() -> None:
     )
 
 
+def test_weak_source_uses_multihop_context_when_cross_session_is_out_of_range() -> None:
+    weak = "vid_weak:00000040"
+    rows = [
+        _pair(weak, "vid_weak:00000030", 1.5),
+        _pair("vid_weak:00000030", "vid_weak:00000020", 1.3),
+        _pair("vid_weak:00000020", "vid_weak:00000010", 1.1),
+        _pair("vid_weak:00000010", "vid_anchor:00000010", 10.0, cross=True),
+    ]
+    selection = {
+        "selected_keyframes": sorted(
+            {str(row[key]) for row in rows for key in ("image_i", "image_j")}
+        ),
+        "admitted_pairs": rows,
+    }
+
+    groups = plan_groups(
+        selection,
+        images_root=Path("/images"),
+        config=MVGroupConfig(
+            scope="targeted",
+            weak_keyframe_ids=(weak,),
+            targets_per_source=3,
+            maximum_bridge_hops=3,
+        ),
+    )
+
+    assert len(groups) == 1
+    assert groups[0].target_ids == (
+        "vid_weak:00000030",
+        "vid_weak:00000020",
+        "vid_weak:00000010",
+    )
+
+
 def test_group_planner_rejects_any_p168_identifier() -> None:
     selection = {
         "selected_keyframes": ["P1680168:00000001", "v1:00000001"],
