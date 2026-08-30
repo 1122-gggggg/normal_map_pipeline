@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 import numpy as np
-from scipy.spatial import cKDTree
+from scipy.spatial import cKDTree  # ty: ignore[unresolved-import]
 
 from .runner import atomic_json
 from .rescue import maximum_triangulation_angle_deg
@@ -500,7 +500,7 @@ def inject_planned_tracks(
                 reconstruction.add_point3D(
                     np.asarray(plan.xyz, dtype=np.float64),
                     track,
-                    np.zeros(3, dtype=np.uint8),
+                    np.zeros(3, dtype=np.uint8),  # ty: ignore[invalid-argument-type]
                 )
             )
         )
