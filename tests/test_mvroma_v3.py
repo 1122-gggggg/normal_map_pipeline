@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from river_mvroma.groups import MVGroupConfig, plan_groups
-from river_mvroma.runner import MVRoMaRequest
+from river_mvroma.runner import MVRoMaRequest, build_worker_command, run_mvroma
 from river_mvroma.tracks import sample_multiview_tracks
 
 
@@ -143,3 +143,71 @@ def test_full_scope_requires_passing_targeted_continuation(tmp_path: Path) -> No
 
     with pytest.raises(ValueError, match="did not pass"):
         request.validate_continuation()
+
+
+def test_dry_run_plans_groups_without_creating_run(tmp_path: Path) -> None:
+    model = tmp_path / "model"
+    model.mkdir()
+    for name in ("cameras.bin", "images.bin", "points3D.bin"):
+        (model / name).write_bytes(name.encode())
+    images = tmp_path / "images"
+    (images / "vid_sparse").mkdir(parents=True)
+    for frame in ("00000010", "00000020"):
+        (images / "vid_sparse" / f"frame_{frame}.jpg").write_bytes(b"image")
+    (images / "vid_anchor").mkdir()
+    (images / "vid_anchor/frame_00000010.jpg").write_bytes(b"image")
+    selection = tmp_path / "selection.json"
+    selection.write_text(
+        json.dumps(
+            {
+                "selected_keyframes": [
+                    "vid_sparse:00000010",
+                    "vid_sparse:00000020",
+                    "vid_anchor:00000010",
+                ],
+                "admitted_pairs": [
+                    _pair("vid_sparse:00000010", "vid_sparse:00000020", 2.0),
+                    _pair(
+                        "vid_sparse:00000010",
+                        "vid_anchor:00000010",
+                        8.0,
+                        cross=True,
+                    ),
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    intrinsics = tmp_path / "intrinsics.json"
+    intrinsics.write_text("{}", encoding="utf-8")
+    runtime = tmp_path / "python"
+    runtime.write_text("#!/bin/sh\n", encoding="utf-8")
+    runtime.chmod(0o755)
+    root = tmp_path / "MV-RoMa"
+    root.mkdir()
+    (root / "demo.py").write_text("", encoding="utf-8")
+    weight = tmp_path / "outdoor_final.pth"
+    weight.write_bytes(b"weight")
+    request = MVRoMaRequest(
+        scope="targeted",
+        input_model=model,
+        images=images,
+        selection=selection,
+        intrinsics=intrinsics,
+        run_dir=tmp_path / "run",
+        runtime_python=runtime,
+        runtime_root=root,
+        weight=weight,
+        sparse_video_ids=("vid_sparse",),
+    )
+
+    plan = run_mvroma(request, dry_run=True)
+
+    assert plan["status"] == "DRY_RUN_READY"
+    assert plan["groups"] == 2
+    assert not request.run_dir.exists()
+    assert build_worker_command(request)[:3] == (
+        str(runtime.resolve()),
+        "-m",
+        "river_mvroma.worker",
+    )

@@ -114,6 +114,31 @@ def build_parser() -> argparse.ArgumentParser:
     refinement.add_argument("--bundle-adjustment-threads", type=int, default=8)
     refinement.add_argument("--dry-run", action="store_true")
     refinement.add_argument("--resume", action="store_true")
+
+    mvroma = commands.add_parser(
+        "mvroma-augment", help="Add strictly gated MV-RoMa tracks to an immutable map copy"
+    )
+    mvroma.add_argument("--scope", choices=("targeted", "full"), required=True)
+    mvroma.add_argument("--input-model", type=Path, required=True)
+    mvroma.add_argument("--images", type=Path, required=True)
+    mvroma.add_argument("--selection", type=Path, required=True)
+    mvroma.add_argument("--intrinsics", type=Path, required=True)
+    mvroma.add_argument("--run", type=Path, required=True)
+    mvroma.add_argument("--runtime-python", type=Path, required=True)
+    mvroma.add_argument("--runtime-root", type=Path, required=True)
+    mvroma.add_argument("--weight", type=Path, required=True)
+    mvroma.add_argument("--continuation-receipt", type=Path)
+    mvroma.add_argument("--coarse-height", type=int, default=378)
+    mvroma.add_argument("--coarse-width", type=int, default=672)
+    mvroma.add_argument("--target-height", type=int, default=756)
+    mvroma.add_argument("--target-width", type=int, default=1344)
+    mvroma.add_argument("--certainty-threshold", type=float, default=0.5)
+    mvroma.add_argument("--max-samples-per-group", type=int, default=1024)
+    mvroma.add_argument("--timeout-seconds", type=int, default=86_400)
+    mvroma.add_argument("--sparse-video", action="append", default=[])
+    mvroma.add_argument("--weak-keyframe", action="append", default=[])
+    mvroma.add_argument("--dry-run", action="store_true")
+    mvroma.add_argument("--resume", action="store_true")
     return parser
 
 
@@ -218,6 +243,34 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ),
             )
             payload = run_refinement(request, dry_run=args.dry_run, resume=args.resume)
+        elif args.command == "mvroma-augment":
+            from river_mvroma.runner import (
+                RIVER_V3_SPARSE_VIDEOS,
+                RIVER_V3_WEAK_KEYFRAMES,
+                MVRoMaRequest,
+                run_mvroma,
+            )
+
+            request = MVRoMaRequest(
+                scope=args.scope,
+                input_model=args.input_model,
+                images=args.images,
+                selection=args.selection,
+                intrinsics=args.intrinsics,
+                run_dir=args.run,
+                runtime_python=args.runtime_python,
+                runtime_root=args.runtime_root,
+                weight=args.weight,
+                continuation_receipt=args.continuation_receipt,
+                coarse_size=(args.coarse_height, args.coarse_width),
+                target_size=(args.target_height, args.target_width),
+                certainty_threshold=args.certainty_threshold,
+                max_samples_per_group=args.max_samples_per_group,
+                sparse_video_ids=tuple(args.sparse_video) or RIVER_V3_SPARSE_VIDEOS,
+                weak_keyframe_ids=tuple(args.weak_keyframe) or RIVER_V3_WEAK_KEYFRAMES,
+                timeout_seconds=args.timeout_seconds,
+            )
+            payload = run_mvroma(request, dry_run=args.dry_run, resume=args.resume)
         else:
             pipeline = SitePipeline.open(args.run)
             if args.command == "run":

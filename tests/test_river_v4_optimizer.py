@@ -14,6 +14,7 @@ from river_v4_optimizer.detector_free_injection import (
     PlannedDetectorFreeTrack,
     cluster_detector_free_matches,
     inject_planned_tracks,
+    plan_observation_tracks,
     plan_detector_free_tracks,
     validate_planned_track,
 )
@@ -484,6 +485,46 @@ def test_detector_free_planner_triangulates_a_three_video_track_from_pair_artifa
         "video-c",
     }
     assert receipt["approved_tracks"] == 1
+
+
+def test_generic_observation_track_planner_triangulates_mvroma_track(tmp_path) -> None:
+    import numpy as np
+    import pycolmap
+
+    options = pycolmap.SyntheticDatasetOptions()
+    options.num_rigs = 3
+    options.num_frames_per_rig = 2
+    options.num_points3D = 80
+    options.track_length = 3
+    reconstruction = pycolmap.synthesize_dataset(options)
+    source_point = next(
+        point for point in reconstruction.points3D.values() if len(point.track.elements) >= 3
+    )
+    observations = {}
+    for index, element in enumerate(source_point.track.elements[:3]):
+        image = reconstruction.images[element.image_id]
+        image.name = f"video-{index}/frame.jpg"
+        observations[image.name] = tuple(image.project_point(source_point.xyz))
+    model = tmp_path / "model"
+    model.mkdir()
+    reconstruction.write(model)
+
+    plans, receipt = plan_observation_tracks(
+        model=model,
+        observation_tracks=[observations],
+        config=DetectorFreeInjectionConfig(
+            required_videos=(),
+            minimum_distinct_videos=2,
+            maximum_reprojection_error_px=3.0,
+            maximum_reprojection_p90_px=2.0,
+            minimum_triangulation_angle_deg=0.1,
+            existing_observation_conflict_radius_px=0.0,
+        ),
+    )
+
+    assert len(plans) == 1
+    assert receipt["approved_tracks"] == 1
+    assert np.linalg.norm(np.asarray(plans[0].xyz) - source_point.xyz) < 1e-4
 
 
 def test_sim3_audit_recovers_known_transform_and_holdout() -> None:

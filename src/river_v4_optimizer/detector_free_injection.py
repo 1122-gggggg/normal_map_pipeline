@@ -24,7 +24,7 @@ class DetectorFreeMatch:
 
 @dataclass(frozen=True)
 class DetectorFreeInjectionConfig:
-    required_videos: tuple[str, str]
+    required_videos: tuple[str, ...]
     anchor_radius_px: float = 2.0
     maximum_anchor_spread_px: float = 3.0
     minimum_distinct_videos: int = 3
@@ -342,6 +342,105 @@ def plan_detector_free_tracks(
     return plans, receipt
 
 
+def plan_observation_tracks(
+    *,
+    model: Path,
+    observation_tracks: Sequence[dict[str, tuple[float, float]]],
+    config: DetectorFreeInjectionConfig,
+) -> tuple[list[PlannedDetectorFreeTrack], dict[str, Any]]:
+    """Triangulate already-clustered multi-view observations in a frozen map gauge."""
+
+    import pycolmap
+
+    reconstruction = pycolmap.Reconstruction(str(model.resolve(strict=True)))
+    images = {str(image.name): image for image in reconstruction.images.values() if image.has_pose}
+    rejection: Counter[str] = Counter()
+    plans: list[PlannedDetectorFreeTrack] = []
+    signatures: set[tuple[tuple[str, tuple[float, float]], ...]] = set()
+    for raw_track in observation_tracks:
+        track = dict(sorted(raw_track.items()))
+        if len(track) < 3 or len(track) != len(set(track)):
+            rejection["minimum_track_length_or_duplicate_image"] += 1
+            continue
+        entries = []
+        for name, xy in track.items():
+            image = images.get(name)
+            point = np.asarray(xy, dtype=np.float64)
+            if image is None or point.shape != (2,) or not np.isfinite(point).all():
+                entries = []
+                break
+            entries.append((name, point, image))
+        if len(entries) < 3:
+            rejection["missing_registered_image_or_invalid_point"] += 1
+            continue
+        options = pycolmap.EstimateTriangulationOptions()
+        options.min_tri_angle = math.radians(config.minimum_triangulation_angle_deg)
+        options.ransac.max_error = math.radians(config.maximum_reprojection_error_px)
+        options.ransac.random_seed = 0
+        result = pycolmap.estimate_triangulation(
+            np.asarray([entry[1] for entry in entries]),
+            [entry[2].cam_from_world() for entry in entries],
+            [entry[2].camera for entry in entries],
+            options,
+        )
+        if result is None:
+            rejection["triangulation_failed"] += 1
+            continue
+        inliers = np.asarray(result["inliers"], dtype=bool)
+        selected = [entry for entry, keep in zip(entries, inliers, strict=True) if keep]
+        if len(selected) < 3:
+            rejection["minimum_inlier_views"] += 1
+            continue
+        xyz = np.asarray(result["xyz"], dtype=np.float64)
+        errors = []
+        observations = []
+        centers = []
+        conflict = False
+        for name, xy, image in selected:
+            if _has_existing_observation_conflict(
+                image, xy, config.existing_observation_conflict_radius_px
+            ):
+                conflict = True
+                break
+            projected = image.project_point(xyz)
+            if projected is None:
+                conflict = True
+                break
+            errors.append(float(np.linalg.norm(np.asarray(projected) - xy)))
+            observations.append((name, (float(xy[0]), float(xy[1]))))
+            centers.append(_camera_center(image))
+        if conflict:
+            rejection["observation_conflict_or_negative_depth"] += 1
+            continue
+        plan = PlannedDetectorFreeTrack(
+            xyz=tuple(float(value) for value in xyz),
+            observations=tuple(observations),
+            reprojection_errors_px=tuple(errors),
+            maximum_triangulation_angle_deg=maximum_triangulation_angle_deg(
+                np.asarray(centers), xyz
+            ),
+        )
+        reason = validate_planned_track(plan, config)
+        if reason is not None:
+            rejection[reason] += 1
+            continue
+        signature = tuple(sorted(plan.observations))
+        if signature in signatures:
+            rejection["duplicate_track"] += 1
+            continue
+        signatures.add(signature)
+        plans.append(plan)
+    plans.sort(key=lambda plan: tuple(sorted(plan.observations)))
+    return plans, {
+        "schema_version": 1,
+        "artifact_type": "MULTIVIEW_OBSERVATION_TRACK_PLAN",
+        "model": str(model.resolve()),
+        "candidate_tracks": len(observation_tracks),
+        "approved_tracks": len(plans),
+        "rejections": dict(sorted(rejection.items())),
+    }
+
+
 def _point_snapshot(reconstruction: Any) -> dict[int, tuple[Any, ...]]:
     return {
         int(point_id): (
@@ -438,5 +537,6 @@ __all__ = [
     "cluster_detector_free_matches",
     "inject_planned_tracks",
     "plan_detector_free_tracks",
+    "plan_observation_tracks",
     "validate_planned_track",
 ]

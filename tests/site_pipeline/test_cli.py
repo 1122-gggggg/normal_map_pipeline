@@ -123,3 +123,29 @@ def test_cli_has_init_run_status_approve_export_and_backfill_commands() -> None:
         ]
     )
     assert dense_full.continuation_receipt.name == "refinement-receipt.json"
+
+    mvroma = parser.parse_args(
+        [
+            "mvroma-augment",
+            "--scope",
+            "targeted",
+            "--input-model",
+            "model",
+            "--images",
+            "images",
+            "--selection",
+            "final_selection.json",
+            "--intrinsics",
+            "intrinsics.json",
+            "--run",
+            "run",
+            "--runtime-python",
+            "/runtime/python",
+            "--runtime-root",
+            "MV-RoMa",
+            "--weight",
+            "outdoor_final.pth",
+        ]
+    )
+    assert mvroma.command == "mvroma-augment"
+    assert mvroma.scope == "targeted"
