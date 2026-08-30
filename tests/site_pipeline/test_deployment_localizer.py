@@ -1,13 +1,30 @@
 from __future__ import annotations
 
+import sys
+
 import numpy as np
 
 from sfm_diagnosis.site_pipeline.deployment_localizer import (
     _prepare_official_pair,
+    _resolve_audited_site_packages,
     localization_is_strong,
     rank_reference_indices,
     scaled_pinhole_parameters,
 )
+
+
+def test_explicit_audited_site_packages_overrides_missing_prefix_path(tmp_path) -> None:
+    explicit = tmp_path / "audited"
+    explicit.mkdir()
+
+    assert _resolve_audited_site_packages(str(explicit), prefix=tmp_path / "missing") == explicit
+    assert _resolve_audited_site_packages(None, prefix=tmp_path / "missing") == (
+        tmp_path
+        / "missing"
+        / "lib"
+        / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        / "site-packages"
+    )
 
 
 def test_scaled_pinhole_parameters_share_intrinsics_by_resolution() -> None:

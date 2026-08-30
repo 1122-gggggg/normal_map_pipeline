@@ -15,6 +15,7 @@ def combine_layer_results(
     scene_scale: float,
     maximum_position_normalized: float = 0.02,
     maximum_rotation_deg: float = 2.0,
+    prefer_robust_on_agreement: bool = False,
 ) -> dict[str, Any]:
     """Fuse two internally gated poses and reject cross-layer disagreement."""
 
@@ -41,7 +42,9 @@ def combine_layer_results(
             and rotation_delta <= maximum_rotation_deg
         )
         if agrees:
-            selected_layer = _better_layer(robust, dense)
+            selected_layer = (
+                "robust" if prefer_robust_on_agreement else _better_layer(robust, dense)
+            )
             status, accepted = "CROSS_LAYER_AGREEMENT", True
         else:
             selected_layer, status = None, "REJECT_CROSS_LAYER_DISAGREEMENT"
@@ -77,6 +80,7 @@ def combine_result_sets(
     scene_scale: float,
     maximum_position_normalized: float = 0.02,
     maximum_rotation_deg: float = 2.0,
+    prefer_robust_on_agreement: bool = False,
 ) -> list[dict[str, Any]]:
     robust = {str(row["query_id"]): row for row in robust_results}
     dense = {str(row["query_id"]): row for row in dense_results}
@@ -89,6 +93,7 @@ def combine_result_sets(
             scene_scale=scene_scale,
             maximum_position_normalized=maximum_position_normalized,
             maximum_rotation_deg=maximum_rotation_deg,
+            prefer_robust_on_agreement=prefer_robust_on_agreement,
         )
         for query_id in sorted(robust)
     ]

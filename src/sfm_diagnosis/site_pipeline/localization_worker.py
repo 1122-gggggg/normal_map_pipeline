@@ -116,9 +116,13 @@ def run_adapter_request(
     result_payload["evidence_class"] = evidence_class
     result_payload["map_query_identity_overlap"] = overlap
     result_payload["mapping_disjoint"] = not overlap
-    result_payload["excluded_query_session_ids"] = sorted(queries)
+    result_payload["excluded_query_session_ids"] = sorted(
+        str(session_id) for session_id in queries.keys()
+    )
     if overlap:
         result_payload["status"] = "SHADOW_GROUP_REFERENCE_EXCLUSION"
+        result_payload["deployment_authorized"] = False
+        result_payload["authority"] = "SHADOW_ONLY_NOT_MAPPING_DISJOINT_NOT_DEPLOYABLE"
     output_validation.write_text(json.dumps(result_payload, indent=2) + "\n", encoding="utf-8")
     references = []
     for role in _jsonl(roles_path):

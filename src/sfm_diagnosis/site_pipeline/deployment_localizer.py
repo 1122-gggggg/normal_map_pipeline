@@ -11,6 +11,7 @@ import gc
 import hashlib
 import json
 import math
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,28 @@ DEFAULT_THRESHOLDS: dict[str, float | int] = {
     "minimum_positive_depth_ratio": 0.99,
     "maximum_reprojection_p90_px": 3.0,
 }
+
+
+def _resolve_audited_site_packages(
+    explicit: str | None,
+    *,
+    prefix: Path | None = None,
+) -> Path:
+    """Resolve the exact site-packages tree approved for the EDM runtime."""
+
+    if explicit:
+        path = Path(explicit).expanduser().resolve(strict=True)
+    else:
+        runtime_prefix = Path(sys.prefix) if prefix is None else Path(prefix)
+        path = (
+            runtime_prefix
+            / "lib"
+            / f"python{sys.version_info.major}.{sys.version_info.minor}"
+            / "site-packages"
+        ).resolve(strict=False)
+    if explicit and not path.is_dir():
+        raise NotADirectoryError(path)
+    return path
 
 
 def scaled_pinhole_parameters(
@@ -105,8 +128,7 @@ def localization_is_strong(
             >= float(thresholds["minimum_inlier_ratio"])
             and float(metrics.get("convex_hull_coverage") or 0.0)
             >= float(thresholds["minimum_hull_coverage"])
-            and int(metrics.get("occupancy_4x4") or 0)
-            >= int(thresholds["minimum_occupancy_4x4"])
+            and int(metrics.get("occupancy_4x4") or 0) >= int(thresholds["minimum_occupancy_4x4"])
             and float(metrics.get("positive_depth_ratio") or 0.0)
             >= float(thresholds["minimum_positive_depth_ratio"])
             and float(metrics.get("reprojection_p90") or math.inf)
@@ -142,6 +164,7 @@ class FinalMapEDMProvider:
         lift_distance_px: float = 2.0,
         thresholds: Mapping[str, Any] | None = None,
         descriptor_batch_size: int = 8,
+        audited_edm_site_packages: str | None = None,
     ) -> None:
         self.map_model = Path(map_model).resolve(strict=True)
         self.keyframes_path = Path(keyframes).resolve(strict=True)
@@ -158,6 +181,7 @@ class FinalMapEDMProvider:
         self.lift_distance_px = float(lift_distance_px)
         self.thresholds = {**DEFAULT_THRESHOLDS, **dict(thresholds or {})}
         self.descriptor_batch_size = int(descriptor_batch_size)
+        self.audited_edm_site_packages = _resolve_audited_site_packages(audited_edm_site_packages)
         if self.top_k <= 0 or self.lift_distance_px <= 0 or self.descriptor_batch_size <= 0:
             raise ValueError("localizer top_k, lift distance, and batch size must be positive")
 
@@ -197,6 +221,7 @@ class FinalMapEDMProvider:
                 "thresholds": self.thresholds,
                 "top_k": self.top_k,
                 "lift_distance_px": self.lift_distance_px,
+                "audited_edm_site_packages": str(self.audited_edm_site_packages),
             }
         )
 
@@ -318,9 +343,7 @@ class FinalMapEDMProvider:
         if missing:
             raise RuntimeError(f"final map image identity is absent from keyframes: {missing[:5]}")
         self._reference_names = names
-        self._reference_sessions = tuple(
-            str(self._keyframes[name]["video_id"]) for name in names
-        )
+        self._reference_sessions = tuple(str(self._keyframes[name]["video_id"]) for name in names)
         self._reference_paths = tuple(
             Path(str(self._keyframes[name]["image_uri"])).resolve(strict=True) for name in names
         )
@@ -389,7 +412,9 @@ class FinalMapEDMProvider:
             self._empty_cuda_cache()
         references = np.ascontiguousarray(references, dtype=np.float32)
         queries = np.ascontiguousarray(queries, dtype=np.float32)
-        if references.shape[0] != len(self._reference_names) or queries.shape[0] != len(query_names):
+        if references.shape[0] != len(self._reference_names) or queries.shape[0] != len(
+            query_names
+        ):
             raise RuntimeError("MegaLoc descriptor rows disagree with frozen image identities")
         if references.ndim != 2 or queries.ndim != 2 or references.shape[1] != queries.shape[1]:
             raise RuntimeError("MegaLoc query/reference descriptor dimensions disagree")
@@ -420,15 +445,10 @@ class FinalMapEDMProvider:
 
     def _matcher_runtime(self) -> Any:
         if self._matcher is None:
-            import sys
-
             import river_map_quality.official_edm_adapter_loo as official_edm
 
-            official_edm.AUDITED_EDM_SITE_PACKAGES = (
-                Path(sys.prefix)
-                / "lib"
-                / f"python{sys.version_info.major}.{sys.version_info.minor}"
-                / "site-packages"
+            official_edm.AUDITED_EDM_SITE_PACKAGES = _resolve_audited_site_packages(
+                str(self.audited_edm_site_packages)
             )
             self._matcher = official_edm.load_official_edm_runtime(
                 edm_repo=Path(str(self.edm_config["repo"])),
