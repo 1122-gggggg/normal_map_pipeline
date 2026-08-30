@@ -228,3 +228,39 @@ failed independent alignment to canonical, although P168+P167 was less severe.
 Decision: keep the existing balanced canonical. The full scan and injection
 prove that P117/P168 support can be manufactured, but the independent submap
 audit shows it is not globally gauge-consistent enough for promotion.
+
+## 13. River V4 FIM / ActLoc spatial weak-region audit
+
+The retained 347-image canonical was scanned over 126 XYZ positions and 36
+yaw/pitch samples per position (4,536 poses). Fast mode remained explicitly
+uncalibrated. The retained GlueMap runtime's official ActLoc preflight was
+blocked by missing `flash_attn`, so it was left untouched. A separate Python
+3.10/PyTorch 2.7.1/CUDA 12.8 environment then ran the untouched official source
+and checkpoint with official FlashAttention 2.8.3 over all 126 positions.
+
+No XYZ position was map-only `WEAK` or `DEAD_ZONE`; every position had at least
+15 supported directions. However, 505 directions were empty and 66 occupied
+directions at 48 positions were FIM-degenerate. Those degenerate directions
+clustered at yaw 60–120 and 240–300 degrees.
+
+A within-run relative ranking found a broad upper/end structural band and two
+far-left boundary cells. The strongest directional weakness was the positive-x
+boundary: 24/25 best samples in its top component faced yaw 150–210 degrees,
+while views across or away from the corridor often saw only one to eight
+landmarks. Causes were collinear mapping trajectories, one-sided visibility,
+clustered landmarks, low-tail parallax, and locally concentrated session
+support.
+
+Official ActLoc independently placed its largest 24-position relative weak
+component at the positive-x/negative-z end, with the lowest best-direction
+score 0.7656 at `[1.012, -0.498, -1.725]`. Occupied-orientation FIM/ActLoc
+quality correlated at rho 0.552, and their direction-sensitivity top quintiles
+overlapped at 10 positions. Their best-direction structural top quintiles did
+not overlap and had rho -0.393; this method disagreement is now an explicit
+outer-holdout question rather than a reason to choose either proxy post hoc.
+
+Decision: retain the canonical map. Prioritize a mapping-disjoint holdout,
+cross-corridor recapture of the positive-x band, and supplemental multi-session
+coverage at the far-left cells. See
+`docs/RIVER_V4_FIM_ACTLOC_WEAK_REGIONS_20260830.md` for the evidence boundary,
+reproduction command, and detailed causes.

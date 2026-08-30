@@ -97,6 +97,29 @@ Keep rejected candidates and compact receipts long enough to prevent repeated
 work. Preserve the winning workspace, pair database, exact selection, source
 hashes, config, code commit, and model checksums.
 
+## Spatial localizability audit
+
+- Keep map-only FIM/ActLoc-style outputs explicitly uncalibrated. A structural
+  rank is not a localization-failure probability.
+- Separate position weakness from orientation weakness. A position is not dead
+  when at least one sampled direction has strong effective landmarks,
+  parallax, and independent observers.
+- Report empty directions separately from occupied-but-FIM-degenerate
+  directions. Both matter for capture planning, but they have different causes.
+- Rank within one fixed map gauge when scale is arbitrary. Do not compare raw
+  FIM eigenvalues or fixed-radius structural-proxy scores across independently
+  scaled reconstructions.
+- Use official ActLoc only when its checkpoint and runtime are attested. Label a
+  structural fallback as a fallback and keep its weight small when metric scale
+  is unknown.
+- Add mesh/depth occlusion and empirical EDM matchability before treating
+  frustum-visible landmarks as reliable localization support.
+- Convert relative weak zones into recapture actions only after checking the
+  best and worst yaw/pitch sectors, local session concentration, and boundary
+  effects.
+- Require mapping-disjoint, group-held-out localization results before
+  calibrating or releasing spatial failure probabilities.
+
 ## Resource discipline
 
 Run GlueMap/global BA candidates sequentially on the 30 GiB host. Do not launch

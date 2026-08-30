@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "evidence_date": "2026-08-29",
+  "evidence_date": "2026-08-30",
   "method_profile": "graph_aware_v4_balanced_multiview",
   "development_validation": {
     "source_run": "graph_aware_v3_balanced_robust_20260826",
@@ -231,6 +231,97 @@
       "relative_pose_passing_both": 0,
       "status": "FAIL_SUBMAP_GAUGE_INCONSISTENT"
     },
+    "canonical_hashes_unchanged": true
+  },
+  "river_v4_fim_actloc_spatial_diagnosis": {
+    "status": "COMPLETED_MAP_ONLY_UNCALIBRATED",
+    "decision": "KEEP_BALANCED_CANONICAL_AND_TARGET_RECAPTURE",
+    "canonical_variant": "balanced_multiview_trimmed_f_4px_1deg",
+    "risk_map_sha256": "ca18823c60ee9efd5bab875451c7d14be04149f60a1afc0d328b202b9a381163",
+    "grid": {
+      "positions": 126,
+      "pose_samples": 4536,
+      "voxel_size_map_units": 0.35,
+      "yaw_step_deg": 30.0,
+      "pitch_values_deg": [-30.0, 0.0, 30.0]
+    },
+    "absolute_map_only_classification": {
+      "hard_weak_positions": 0,
+      "hard_dead_positions": 0,
+      "view_direction_sensitive_occupied_orientations": 4031,
+      "empty_unknown_orientations": 505,
+      "fim_degenerate_occupied_orientations": 66,
+      "fim_degenerate_positions": 48,
+      "minimum_supported_orientations_per_position": 15
+    },
+    "official_actloc_preflight": {
+      "source_commit": "8614dc4a9c470736871d24cf92dde8f8e7f45cf9",
+      "checkpoint_sha256": "326783de90ff8502001d99013bdd9b766e66859e73c0ddf0201d68061ccac6f4",
+      "gpu_compute_capability": "12.0",
+      "retained_gluemap_runtime_status": "BLOCKED_MISSING_FLASH_ATTN_UNCHANGED",
+      "isolated_runtime_status": "COMPLETE_126_OF_126",
+      "isolated_runtime": "python3.10_torch2.7.1+cu128_cuda12.8_flash_attn2.8.3",
+      "flash_attention_wheel_sha256": "ce91e246f21d61ad66b1a7555340dbaa28e4aa86edcf00c18f0837422939b529",
+      "locmap_json_sha256": "a719c2d954e2425fe96c83705a7869e1cecc4e0a00c1c2958114ca0b7871e842",
+      "locmap_npz_sha256": "308323b0347c7f98594a189595050f993f0f57c4ec9ff7d06274433188be7343"
+    },
+    "actloc_evidence": {
+      "source": "official_source_checkpoint_and_flash_attention_isolated_runtime",
+      "position_best_score_min": 0.765625,
+      "position_best_score_median": 0.96875,
+      "position_best_score_p95": 0.9873046875,
+      "position_worst_score_min": 0.040283203125,
+      "position_worst_score_median": 0.10498046875,
+      "crop_point_count_min": 12057,
+      "crop_point_count_max": 16315,
+      "score_semantics": "uncalibrated_class0_softmax_direction_quality"
+    },
+    "relative_structural_candidates": {
+      "quantile": 0.8,
+      "components": 3,
+      "largest_component_positions": 24,
+      "largest_component_center": [-0.18424028765825237, -0.0457430085955689, 0.09808736428684443],
+      "isolated_boundary_positions": [
+        [-0.738406954324919, -0.1478263419289022, -1.724829302379822],
+        [-0.738406954324919, 0.20217365807109777, -1.3748293023798221]
+      ]
+    },
+    "direction_sensitive_candidate": {
+      "largest_component_positions": 25,
+      "center": [0.829593045675081, -0.11982634192890221, -0.8568293023798219],
+      "representative_position": [1.011593045675081, 0.20217365807109777, -0.6748293023798222],
+      "representative_best_yaw_pitch_deg": [210.0, 30.0],
+      "representative_worst_yaw_pitch_deg": [60.0, -30.0],
+      "best_yaw_sector_for_24_of_25_positions_deg": [150.0, 210.0]
+    },
+    "official_actloc_relative_candidate": {
+      "largest_component_positions": 24,
+      "center": [0.8657597123416666, -0.20615967526233328, -1.0977459690466669],
+      "representative_position": [1.011593045675, -0.497826341929, -1.72482930238],
+      "representative_best_score": 0.765625,
+      "representative_best_yaw_pitch_deg": [120.0, 20.0]
+    },
+    "fim_official_actloc_comparison": {
+      "orientation_quality_spearman_rho": 0.551700251388593,
+      "direction_sensitivity_spearman_rho": 0.36872078149084275,
+      "position_relative_weakness_spearman_rho": -0.3926090137582444,
+      "top_quintile_structural_intersection": 0,
+      "top_quintile_direction_intersection": 10,
+      "best_direction_yaw30_pitch20_agreement": 50,
+      "positions": 126,
+      "comparison_sha256": "2135cba8f24d82bb6ce1bdefad807617319f9ced0f49a90b6b3b9e6d2672b329"
+    },
+    "primary_causes": [
+      "COLLINEAR_MAPPING_TRAJECTORY",
+      "CORRIDOR_LIKE_GEOMETRY",
+      "ONE_SIDED_OR_EMPTY_FRUSTUM_WHEN_FACING_AWAY",
+      "CLUSTERED_LANDMARK_GEOMETRY",
+      "RELATIVELY_LOW_PARALLAX",
+      "LOCAL_SESSION_CONCENTRATION"
+    ],
+    "probability_status": "UNCALIBRATED_UNKNOWN",
+    "visibility": "frustum_only_no_mesh_occlusion",
+    "matchability": "heuristic_no_mapping_disjoint_edm_labels",
     "canonical_hashes_unchanged": true
   }
 }
