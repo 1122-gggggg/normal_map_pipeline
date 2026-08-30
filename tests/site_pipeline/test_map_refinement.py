@@ -7,6 +7,8 @@ import pytest
 
 from sfm_diagnosis.site_pipeline.map_refinement import (
     RefinementRequest,
+    apply_pose_stability_gate,
+    apply_topology_gate,
     build_backend_command,
     evaluate_geometry_gate,
     evaluate_localization_gate,
@@ -205,3 +207,38 @@ def test_geometry_gate_rejects_a_candidate_that_changes_fixed_intrinsics() -> No
 
     assert result["passes"] is False
     assert result["checks"]["fixed_intrinsics_unchanged"] is False
+
+
+def test_pose_stability_gate_rejects_sim3_aligned_camera_drift() -> None:
+    geometry = {"passes": True, "checks": {"geometry": True}}
+
+    result = apply_pose_stability_gate(
+        geometry,
+        {"status": "OK", "position_p90_normalized": 0.03, "rotation_p90_deg": 0.5},
+    )
+
+    assert result["passes"] is False
+    assert result["checks"]["sim3_position_p90_within_0_02"] is False
+    assert result["checks"]["sim3_rotation_p90_within_2deg"] is True
+
+
+def test_topology_gate_rejects_new_bridge_and_multiview_track_regression() -> None:
+    geometry = {"passes": True, "checks": {"geometry": True}}
+    baseline = {
+        "largest_component_ratio": 0.99,
+        "articulation_count": 0,
+        "bridge_count": 0,
+        "multi_view_track_ratio_ge5": 0.65,
+        "low_observation_images": ["weak-a"],
+    }
+    candidate = {
+        **baseline,
+        "bridge_count": 1,
+        "multi_view_track_ratio_ge5": 0.63,
+    }
+
+    result = apply_topology_gate(geometry, baseline, candidate)
+
+    assert result["passes"] is False
+    assert result["checks"]["bridge_count_non_regression"] is False
+    assert result["checks"]["multi_view_track_non_regression"] is False

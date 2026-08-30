@@ -351,6 +351,17 @@ def run_refinement(
     input_metrics = _load_metrics(request.input_model)
     candidate_metrics = _load_metrics(request.robust_model)
     qa = evaluate_geometry_gate(input_metrics, candidate_metrics)
+    from .loo import aligned_camera_stability
+
+    pose_stability = aligned_camera_stability(
+        _camera_pose_map(request.input_model), _camera_pose_map(request.robust_model)
+    )
+    qa = apply_pose_stability_gate(qa, pose_stability)
+    from river_v4_optimizer.metrics import analyze_model
+
+    baseline_topology = _topology_summary(analyze_model(request.input_model))
+    candidate_topology = _topology_summary(analyze_model(request.robust_model))
+    qa = apply_topology_gate(qa, baseline_topology, candidate_topology)
     qa_path = request.run_dir / "qa.json"
     qa_path.write_text(json.dumps(qa, indent=2) + "\n", encoding="utf-8")
     filter_path = request.run_dir / "robust_filter_receipt.json"
@@ -453,6 +464,65 @@ def evaluate_localization_gate(
     }
 
 
+def apply_pose_stability_gate(
+    geometry: Mapping[str, Any], stability: Mapping[str, Any]
+) -> dict[str, Any]:
+    result = dict(geometry)
+    checks = dict(result.get("checks") or {})
+    checks.update(
+        {
+            "sim3_alignment_available": stability.get("status") == "OK",
+            "sim3_position_p90_within_0_02": (
+                stability.get("status") == "OK"
+                and stability.get("position_p90_normalized") is not None
+                and float(stability["position_p90_normalized"]) <= 0.02
+            ),
+            "sim3_rotation_p90_within_2deg": (
+                stability.get("status") == "OK"
+                and stability.get("rotation_p90_deg") is not None
+                and float(stability["rotation_p90_deg"]) <= 2.0
+            ),
+        }
+    )
+    result["checks"] = checks
+    result["pose_stability"] = dict(stability)
+    result["passes"] = all(checks.values())
+    return result
+
+
+def apply_topology_gate(
+    geometry: Mapping[str, Any],
+    baseline: Mapping[str, Any],
+    candidate: Mapping[str, Any],
+) -> dict[str, Any]:
+    result = dict(geometry)
+    checks = dict(result.get("checks") or {})
+    checks.update(
+        {
+            "largest_component_non_regression": float(
+                candidate.get("largest_component_ratio") or 0.0
+            )
+            >= float(baseline.get("largest_component_ratio") or 0.0),
+            "articulation_count_non_regression": int(candidate.get("articulation_count") or 0)
+            <= int(baseline.get("articulation_count") or 0),
+            "bridge_count_non_regression": int(candidate.get("bridge_count") or 0)
+            <= int(baseline.get("bridge_count") or 0),
+            "multi_view_track_non_regression": float(
+                candidate.get("multi_view_track_ratio_ge5") or 0.0
+            )
+            >= float(baseline.get("multi_view_track_ratio_ge5") or 0.0),
+            "low_observation_images_non_regression": len(
+                candidate.get("low_observation_images") or ()
+            )
+            <= len(baseline.get("low_observation_images") or ()),
+        }
+    )
+    result["checks"] = checks
+    result["topology"] = {"baseline": dict(baseline), "candidate": dict(candidate)}
+    result["passes"] = all(checks.values())
+    return result
+
+
 def _load_metrics(model: Path) -> dict[str, Any]:
     import pycolmap
 
@@ -468,6 +538,38 @@ def _load_metrics(model: Path) -> dict[str, Any]:
         for camera_id, camera in sorted(reconstruction.cameras.items())
     }
     return metrics
+
+
+def _camera_pose_map(model: Path) -> dict[str, dict[str, Any]]:
+    import pycolmap
+
+    reconstruction = pycolmap.Reconstruction(str(model))
+    poses: dict[str, dict[str, Any]] = {}
+    for image in reconstruction.images.values():
+        if not image.has_pose:
+            continue
+        cam_from_world = image.cam_from_world()
+        poses[image.name] = {
+            "center": cam_from_world.inverse().translation.tolist(),
+            "rotation": cam_from_world.rotation.matrix().tolist(),
+        }
+    return poses
+
+
+def _topology_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: payload.get(key)
+        for key in (
+            "largest_component_ratio",
+            "component_sizes",
+            "articulation_count",
+            "articulation_images",
+            "bridge_count",
+            "bridge_edges",
+            "multi_view_track_ratio_ge5",
+            "low_observation_images",
+        )
+    }
 
 
 def _within_upper_tolerance(baseline: Any, candidate: Any, tolerance: float) -> bool:
@@ -514,6 +616,8 @@ def _json_hash(payload: Mapping[str, Any]) -> str:
 __all__ = [
     "REFINEMENT_BACKENDS",
     "RefinementRequest",
+    "apply_pose_stability_gate",
+    "apply_topology_gate",
     "build_backend_command",
     "evaluate_geometry_gate",
     "evaluate_localization_gate",
