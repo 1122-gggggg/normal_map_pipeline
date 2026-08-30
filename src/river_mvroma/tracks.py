@@ -18,6 +18,7 @@ def sample_multiview_tracks(
     certainty_logits: np.ndarray,
     native_size: tuple[int, int],
     certainty_threshold: float,
+    minimum_target_observations: int = 2,
     grid_rows: int = 27,
     grid_cols: int = 48,
     max_samples: int = 1024,
@@ -32,11 +33,15 @@ def sample_multiview_tracks(
         raise ValueError("MV-RoMa target name count does not match flow")
     if not 0.0 < certainty_threshold < 1.0:
         raise ValueError("certainty threshold must be in (0,1)")
+    if minimum_target_observations < 2:
+        raise ValueError("MV-RoMa tracks require at least two target observations")
     target_count, _, height, width = warps.shape
-    if target_count < 2:
+    if target_count < minimum_target_observations:
         return []
     certainty = _sigmoid(logits)
-    second_best = np.partition(certainty, -2, axis=0)[-2]
+    required_score = np.partition(certainty, -minimum_target_observations, axis=0)[
+        -minimum_target_observations
+    ]
     candidates: list[tuple[float, int, int]] = []
     row_edges = np.linspace(0, height, grid_rows + 1, dtype=int)
     col_edges = np.linspace(0, width, grid_cols + 1, dtype=int)
@@ -46,11 +51,11 @@ def sample_multiview_tracks(
             x0, x1 = col_edges[col], col_edges[col + 1]
             if y1 <= y0 or x1 <= x0:
                 continue
-            tile = second_best[y0:y1, x0:x1]
+            tile = required_score[y0:y1, x0:x1]
             offset = int(np.argmax(tile))
             local_y, local_x = np.unravel_index(offset, tile.shape)
             y, x = y0 + int(local_y), x0 + int(local_x)
-            score = float(second_best[y, x])
+            score = float(required_score[y, x])
             if score >= certainty_threshold:
                 candidates.append((score, y, x))
     candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
@@ -73,7 +78,7 @@ def sample_multiview_tracks(
             if not (0.0 <= target_x < native_width and 0.0 <= target_y < native_height):
                 continue
             observations[str(target_name)] = (target_x, target_y)
-        if len(observations) >= 3:
+        if len(observations) >= minimum_target_observations + 1:
             tracks.append(observations)
     return tracks
 

@@ -40,7 +40,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def run_worker(payload: dict[str, Any]) -> dict[str, Any]:
-    import torch
+    import torch  # ty: ignore[unresolved-import]
 
     from demo import build_model_matcher  # ty: ignore[unresolved-import]
     from src.run_model import run_model_test  # ty: ignore[unresolved-import]

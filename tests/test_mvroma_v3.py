@@ -138,6 +138,43 @@ def test_flow_sampling_requires_two_confident_targets_and_restores_native_pixels
     assert tracks[0]["v1/a.jpg"] == pytest.approx((2687 / 2, 1511 / 2))
 
 
+def test_flow_sampling_can_require_a_five_view_track() -> None:
+    height, width = 4, 8
+    flow = np.zeros((5, 2, height, width), dtype=np.float32)
+    logits = np.full((5, height, width), -10.0, dtype=np.float32)
+    logits[:3, 1, 2] = 10.0
+
+    rejected = sample_multiview_tracks(
+        source_name="v0/frame.jpg",
+        target_names=tuple(f"v{index}/frame.jpg" for index in range(1, 6)),
+        flow=flow,
+        certainty_logits=logits,
+        native_size=(1512, 2688),
+        certainty_threshold=0.5,
+        minimum_target_observations=4,
+        grid_rows=4,
+        grid_cols=8,
+        max_samples=16,
+    )
+    logits[3, 1, 2] = 10.0
+    accepted = sample_multiview_tracks(
+        source_name="v0/frame.jpg",
+        target_names=tuple(f"v{index}/frame.jpg" for index in range(1, 6)),
+        flow=flow,
+        certainty_logits=logits,
+        native_size=(1512, 2688),
+        certainty_threshold=0.5,
+        minimum_target_observations=4,
+        grid_rows=4,
+        grid_cols=8,
+        max_samples=16,
+    )
+
+    assert rejected == []
+    assert len(accepted) == 1
+    assert len(accepted[0]) == 5
+
+
 def test_request_requires_aspect_preserving_patch14_resolution(tmp_path: Path) -> None:
     request = MVRoMaRequest(
         scope="targeted",

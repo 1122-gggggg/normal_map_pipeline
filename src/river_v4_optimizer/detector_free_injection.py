@@ -28,10 +28,15 @@ class DetectorFreeInjectionConfig:
     anchor_radius_px: float = 2.0
     maximum_anchor_spread_px: float = 3.0
     minimum_distinct_videos: int = 3
+    minimum_track_length: int = 3
     maximum_reprojection_error_px: float = 2.0
     maximum_reprojection_p90_px: float = 1.5
     minimum_triangulation_angle_deg: float = 1.0
     existing_observation_conflict_radius_px: float = 1.0
+
+    def __post_init__(self) -> None:
+        if self.minimum_track_length < 3:
+            raise ValueError("detector-free minimum track length must be at least three")
 
 
 @dataclass(frozen=True)
@@ -46,7 +51,7 @@ def validate_planned_track(
     plan: PlannedDetectorFreeTrack,
     config: DetectorFreeInjectionConfig,
 ) -> str | None:
-    if len(plan.observations) < 3:
+    if len(plan.observations) < config.minimum_track_length:
         return "minimum_track_length"
     image_names = [str(name) for name, _ in plan.observations]
     if len(image_names) != len(set(image_names)):
@@ -214,23 +219,17 @@ def plan_detector_free_tracks(
     seed = [row for row in seed_geometry if str(row.get("admission") or "") == "VERIFIED"]
     if not seed:
         raise RuntimeError("no VERIFIED detector-free seed pairs")
-    seed_endpoints = {
-        str(row[key]) for row in seed for key in ("image_i", "image_j")
-    }
+    seed_endpoints = {str(row[key]) for row in seed for key in ("image_i", "image_j")}
     support = [
         row
         for row in support_geometry
         if str(row.get("admission") or "") == "VERIFIED"
         and str(row.get("image_i")) in selected_keyframes
         and str(row.get("image_j")) in selected_keyframes
-        and (
-            str(row.get("image_i")) in seed_endpoints
-            or str(row.get("image_j")) in seed_endpoints
-        )
+        and (str(row.get("image_i")) in seed_endpoints or str(row.get("image_j")) in seed_endpoints)
     ]
     geometry_by_pair = {
-        tuple(sorted((str(row["image_i"]), str(row["image_j"])))): row
-        for row in (*support, *seed)
+        tuple(sorted((str(row["image_i"]), str(row["image_j"])))): row for row in (*support, *seed)
     }
     matches = _matches_from_geometry(geometry_by_pair.values())
     clustered, rejected_spread = cluster_detector_free_matches(
@@ -245,7 +244,10 @@ def plan_detector_free_tracks(
     signatures: set[tuple[tuple[str, tuple[float, float]], ...]] = set()
     for track in clustered:
         videos = {name.split(":", 1)[0] for name in track}
-        if not set(config.required_videos) <= videos or len(videos) < config.minimum_distinct_videos:
+        if (
+            not set(config.required_videos) <= videos
+            or len(videos) < config.minimum_distinct_videos
+        ):
             rejection["required_video_span"] += 1
             continue
         entries = []
@@ -258,7 +260,7 @@ def plan_detector_free_tracks(
                 missing_image = True
                 break
             entries.append((keyframe_id, output_name, np.asarray(xy, dtype=np.float64), image))
-        if missing_image or len(entries) < 3:
+        if missing_image or len(entries) < config.minimum_track_length:
             rejection["missing_registered_image"] += 1
             continue
         options = pycolmap.EstimateTriangulationOptions()
@@ -278,7 +280,7 @@ def plan_detector_free_tracks(
         inlier_entries = [entry for entry, keep in zip(entries, inliers, strict=True) if keep]
         inlier_videos = {entry[0].split(":", 1)[0] for entry in inlier_entries}
         if (
-            len(inlier_entries) < 3
+            len(inlier_entries) < config.minimum_track_length
             or not set(config.required_videos) <= inlier_videos
             or len(inlier_videos) < config.minimum_distinct_videos
         ):
@@ -359,7 +361,7 @@ def plan_observation_tracks(
     signatures: set[tuple[tuple[str, tuple[float, float]], ...]] = set()
     for raw_track in observation_tracks:
         track = dict(sorted(raw_track.items()))
-        if len(track) < 3 or len(track) != len(set(track)):
+        if len(track) < config.minimum_track_length or len(track) != len(set(track)):
             rejection["minimum_track_length_or_duplicate_image"] += 1
             continue
         entries = []
@@ -370,7 +372,7 @@ def plan_observation_tracks(
                 entries = []
                 break
             entries.append((name, point, image))
-        if len(entries) < 3:
+        if len(entries) < config.minimum_track_length:
             rejection["missing_registered_image_or_invalid_point"] += 1
             continue
         options = pycolmap.EstimateTriangulationOptions()
@@ -388,7 +390,7 @@ def plan_observation_tracks(
             continue
         inliers = np.asarray(result["inliers"], dtype=bool)
         selected = [entry for entry, keep in zip(entries, inliers, strict=True) if keep]
-        if len(selected) < 3:
+        if len(selected) < config.minimum_track_length:
             rejection["minimum_inlier_views"] += 1
             continue
         xyz = np.asarray(result["xyz"], dtype=np.float64)
@@ -413,7 +415,7 @@ def plan_observation_tracks(
             rejection["observation_conflict_or_negative_depth"] += 1
             continue
         plan = PlannedDetectorFreeTrack(
-            xyz=tuple(float(value) for value in xyz),
+            xyz=(float(xyz[0]), float(xyz[1]), float(xyz[2])),
             observations=tuple(observations),
             reprojection_errors_px=tuple(errors),
             maximum_triangulation_angle_deg=maximum_triangulation_angle_deg(

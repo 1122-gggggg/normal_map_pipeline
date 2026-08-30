@@ -399,6 +399,13 @@ def test_detector_free_plan_gate_requires_required_videos_third_view_and_clean_g
     )
     assert validate_planned_track(low_angle, config) == "triangulation_angle"
 
+    five_view_config = DetectorFreeInjectionConfig(
+        required_videos=(),
+        minimum_distinct_videos=2,
+        minimum_track_length=5,
+    )
+    assert validate_planned_track(good, five_view_config) == "minimum_track_length"
+
 
 def test_detector_free_planner_triangulates_a_three_video_track_from_pair_artifacts(
     tmp_path,
@@ -420,9 +427,7 @@ def test_detector_free_planner_triangulates_a_three_video_track_from_pair_artifa
     output_names = ("video-a/a.jpg", "video-b/b.jpg", "video-c/c.jpg")
     keyframes = {}
     projected = {}
-    for keyframe_id, output_name, element in zip(
-        keyframe_ids, output_names, elements, strict=True
-    ):
+    for keyframe_id, output_name, element in zip(keyframe_ids, output_names, elements, strict=True):
         image = reconstruction.images[element.image_id]
         image.name = output_name
         projected[keyframe_id] = np.asarray(image.project_point(source_point.xyz))
@@ -539,9 +544,7 @@ def test_sim3_audit_recovers_known_transform_and_holdout() -> None:
     rotation = Rotation.from_euler("xyz", [10.0, -5.0, 20.0], degrees=True).as_matrix()
     scale = 1.7
     translation = np.asarray([3.0, -2.0, 5.0])
-    target = {
-        name: scale * (point @ rotation.T) + translation for name, point in source.items()
-    }
+    target = {name: scale * (point @ rotation.T) + translation for name, point in source.items()}
 
     transform = estimate_similarity_transform(
         np.asarray([source[name] for name in names[3:]]),

@@ -23,6 +23,9 @@ RIVER_V3_WEAK_KEYFRAMES = (
     "vid_600bbf70227311ca:00002388",
 )
 MODEL_FILES = ("cameras.bin", "images.bin", "points3D.bin")
+TARGETS_PER_SOURCE = 5
+MAXIMUM_BRIDGE_HOPS = 4
+MINIMUM_TRACK_LENGTH = 5
 
 
 @dataclass(frozen=True)
@@ -124,6 +127,11 @@ class MVRoMaRequest:
             "target_size": self.target_size,
             "certainty_threshold": self.certainty_threshold,
             "max_samples_per_group": self.max_samples_per_group,
+            "track_policy": {
+                "targets_per_source": TARGETS_PER_SOURCE,
+                "maximum_bridge_hops": MAXIMUM_BRIDGE_HOPS,
+                "minimum_track_length": MINIMUM_TRACK_LENGTH,
+            },
             "sparse_video_ids": self.sparse_video_ids,
             "weak_keyframe_ids": self.weak_keyframe_ids,
             "continuation": (
@@ -157,7 +165,8 @@ def run_mvroma(
             scope=request.scope,
             sparse_video_ids=request.sparse_video_ids,
             weak_keyframe_ids=request.weak_keyframe_ids,
-            targets_per_source=3,
+            targets_per_source=TARGETS_PER_SOURCE,
+            maximum_bridge_hops=MAXIMUM_BRIDGE_HOPS,
         ),
     )
     fingerprint = request.fingerprint()
@@ -198,7 +207,7 @@ def run_mvroma(
     request.worker_request.write_text(
         json.dumps(worker_payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-    from sfm_diagnosis.site_pipeline.adapters import (  # ty: ignore[unresolved-import]
+    from sfm_diagnosis.site_pipeline.adapters import (
         ExclusiveResourceLease,
         probe_python_runtime,
         require_compute_capability,
@@ -249,15 +258,16 @@ def run_mvroma(
                     certainty_logits=np.asarray(arrays["certainty_logits"], dtype=np.float32),
                     native_size=(1512, 2688),
                     certainty_threshold=request.certainty_threshold,
+                    minimum_target_observations=MINIMUM_TRACK_LENGTH - 1,
                     max_samples=request.max_samples_per_group,
                 )
             )
-    from river_v4_optimizer.detector_free_injection import (  # ty: ignore[unresolved-import]
+    from river_v4_optimizer.detector_free_injection import (
         DetectorFreeInjectionConfig,
         inject_planned_tracks,
         plan_observation_tracks,
     )
-    from river_v4_optimizer.runner import atomic_json  # ty: ignore[unresolved-import]
+    from river_v4_optimizer.runner import atomic_json
 
     plans, track_plan = plan_observation_tracks(
         model=request.input_model,
@@ -265,6 +275,7 @@ def run_mvroma(
         config=DetectorFreeInjectionConfig(
             required_videos=(),
             minimum_distinct_videos=2,
+            minimum_track_length=MINIMUM_TRACK_LENGTH,
             maximum_reprojection_error_px=3.0,
             maximum_reprojection_p90_px=2.0,
             minimum_triangulation_angle_deg=1.0,
@@ -277,6 +288,7 @@ def run_mvroma(
             "sampled_observation_tracks": len(observation_tracks),
             "certainty_threshold": request.certainty_threshold,
             "max_samples_per_group": request.max_samples_per_group,
+            "minimum_track_length": MINIMUM_TRACK_LENGTH,
         }
     )
     atomic_json(request.run_dir / "receipts/track_plan.json", track_plan)
@@ -298,7 +310,7 @@ def run_mvroma(
     injected_model = request.run_dir / "artifacts/injected/model"
     robust_model = request.run_dir / "artifacts/robust/model"
     injection = inject_planned_tracks(request.input_model, injected_model, plans)
-    from sfm_diagnosis.site_pipeline.robust_filter import (  # ty: ignore[unresolved-import]
+    from sfm_diagnosis.site_pipeline.robust_filter import (
         RobustFilterConfig,
         robust_filter_model,
     )
@@ -350,11 +362,11 @@ def _mapping_gate(
     expected_groups: int,
 ) -> dict[str, Any]:
     import pycolmap
-    from river_v4_optimizer.metrics import analyze_model  # ty: ignore[unresolved-import]
-    from sfm_diagnosis.site_pipeline.loo import (  # ty: ignore[unresolved-import]
+    from river_v4_optimizer.metrics import analyze_model
+    from sfm_diagnosis.site_pipeline.loo import (
         aligned_camera_stability,
     )
-    from sfm_diagnosis.site_pipeline.map_refinement import (  # ty: ignore[unresolved-import]
+    from sfm_diagnosis.site_pipeline.map_refinement import (
         _camera_pose_map,
         _load_metrics,
         _topology_summary,
