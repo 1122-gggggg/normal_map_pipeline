@@ -129,6 +129,7 @@ def model_runtime_attestation(
             "path": str(map_dir),
             "model_file_sha256": map_files,
             "coordinate_scale": args.coordinate_scale,
+            "coordinate_scale_factor": args.coordinate_scale_factor,
             "grid_positions": int(len(positions)),
             "risk_map_path": str(args.risk_map),
             "risk_map_sha256": sha256_file(args.risk_map),
@@ -148,7 +149,7 @@ def model_runtime_attestation(
         "preprocessing": (
             "Released ActLoc functions: filter_points_by_error(error<0.5), transform_data, "
             "crop_to_bounding_box(x,y=+/-4,z=+/-2), prepare_features_for_one_waypoint, and "
-            "create_single_sample_batch_for_inference. No point thinning or coordinate rescaling."
+            "create_single_sample_batch_for_inference. Transformed landmark coordinates and camera centers are multiplied by coordinate_scale_factor before cropping/features; rotations/colors are unchanged."
         ),
     }
 
@@ -234,6 +235,7 @@ def attestations_match(actual: dict[str, Any], expected: dict[str, Any]) -> bool
         ("map", "model_file_sha256"),
         ("runner_sha256",),
         ("map", "coordinate_scale"),
+        ("map", "coordinate_scale_factor"),
         ("map", "grid_positions"),
         ("torch", "version"),
         ("torch", "cuda"),
@@ -273,6 +275,7 @@ def locmap_record(
     images: dict[Any, Any],
     model: torch.nn.Module,
     device: torch.device,
+    coordinate_scale_factor: float = 1.0,
 ) -> dict[str, Any]:
     import torch
     from actloc_core.processing import (
@@ -286,6 +289,8 @@ def locmap_record(
     transformed_points, transformed_colors, rotmats, camera_centers = transform_data(
         filtered_points, filtered_colors, images, waypoint
     )
+    transformed_points = transformed_points * coordinate_scale_factor
+    camera_centers = camera_centers * coordinate_scale_factor
     cropped_points, cropped_colors = crop_to_bounding_box(transformed_points, transformed_colors)
     pc_features, pose_features = prepare_features_for_one_waypoint(
         cropped_points, cropped_colors, rotmats, camera_centers
@@ -382,6 +387,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--flash-wheel", type=Path)
     parser.add_argument("--coordinate-scale", default="UNKNOWN_SFM_GAUGE")
+    parser.add_argument("--coordinate-scale-factor", type=float, default=1.0)
     parser.add_argument("--max-waypoints", type=int, default=None)
     parser.add_argument("--resume", action="store_true")
     return parser.parse_args()
@@ -414,6 +420,8 @@ def main() -> None:
     from actloc_core.torch_utils import load_model
 
     args = parse_args()
+    if not np.isfinite(args.coordinate_scale_factor) or args.coordinate_scale_factor <= 0:
+        raise ValueError("--coordinate-scale-factor must be a finite positive float")
     if not torch.cuda.is_available():
         raise RuntimeError("Official ActLoc requires CUDA")
     for path in (args.sfm_dir, args.risk_map, args.checkpoint, args.source_root):
@@ -458,6 +466,7 @@ def main() -> None:
             images=images,
             model=model,
             device=device,
+            coordinate_scale_factor=args.coordinate_scale_factor,
         )
         records.append(record)
         atomic_write_json(partial_path, build_payload(attestation, records, complete=False))

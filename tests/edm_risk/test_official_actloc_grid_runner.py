@@ -18,6 +18,51 @@ def test_orientation_grid_is_released_6x18_grid():
     assert azimuths.tolist() == list(range(-180, 180, 20))
 
 
+def test_coordinate_scale_factor_is_positive_and_recorded_in_attestation():
+    parser = runner.parse_args
+    import sys
+
+    old = sys.argv
+    try:
+        sys.argv = [
+            "runner",
+            "--sfm-dir",
+            ".",
+            "--risk-map",
+            ".",
+            "--checkpoint",
+            ".",
+            "--source-root",
+            ".",
+            "--output-dir",
+            ".",
+        ]
+        args = parser()
+    finally:
+        sys.argv = old
+    assert args.coordinate_scale_factor == 1.0
+
+
+def test_attestation_rejects_coordinate_scale_factor_change():
+    identity = {
+        "checkpoint_sha256": "c",
+        "source_revision": "s",
+        "runner_sha256": "r",
+        "map": {
+            "risk_map_sha256": "m",
+            "model_file_sha256": {},
+            "coordinate_scale": "x",
+            "coordinate_scale_factor": 1.0,
+            "grid_positions": 1,
+        },
+        "torch": {"version": "t", "cuda": "c", "compute_capability": [1, 2], "architectures": []},
+        "flash_attention": {"version": "v", "module": "mod", "wheel_sha256": None},
+        "orientation_grid": {"elevations_deg": [-60], "azimuths_deg": [-180]},
+    }
+    changed = {**identity, "map": {**identity["map"], "coordinate_scale_factor": 2.0}}
+    assert not runner.attestations_match(identity, changed)
+
+
 def test_to_builtin_recursively_handles_numpy_values():
     value = {np.int64(3): (np.float32(1.25), np.array([np.int32(2), 4]))}
     assert runner.to_builtin(value) == {"3": [1.25, [2, 4]]}
@@ -101,6 +146,7 @@ def test_attestation_full_match_allows_both_missing_wheel_hashes():
             "risk_map_sha256": "m",
             "model_file_sha256": {},
             "coordinate_scale": "x",
+            "coordinate_scale_factor": 1.0,
             "grid_positions": 1,
         },
         "torch": {"version": "t", "cuda": "c", "compute_capability": [1, 2], "architectures": []},
