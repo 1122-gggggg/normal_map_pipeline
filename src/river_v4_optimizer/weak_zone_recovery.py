@@ -20,6 +20,12 @@ def _rotation(row: Mapping[str, Any]) -> np.ndarray:
     return np.asarray(row.get("rotation", row.get("R_wc", np.eye(3))), dtype=float).reshape(3, 3)
 
 
+def _forward(row: Mapping[str, Any]) -> np.ndarray:
+    """Return world forward under explicit R_wc (camera-to-world) convention."""
+    value = _rotation(row) @ np.array([0.0, 0.0, 1.0])
+    return value / max(float(np.linalg.norm(value)), 1e-12)
+
+
 def _interpolate(a: Mapping[str, Any], b: Mapping[str, Any], frame_index: float) -> tuple[np.ndarray, np.ndarray]:
     t = (frame_index - float(a["frame_index"])) / (float(b["frame_index"]) - float(a["frame_index"]))
     center = (1.0 - t) * _center(a) + t * _center(b)
@@ -45,9 +51,12 @@ def plan_weak_zone_recovery(
     max_candidates: int = 12,
     min_candidates: int = 8,
     pair_radius: float = 8.0,
+    min_frame_spacing: int = 0,
+    references_per_candidate: int = 3,
+    fail_closed: bool = True,
 ) -> dict[str, Any]:
     """Return deterministic candidate/rejection/pair records for pre-match use."""
-    if max_frame_gap < 1 or max_candidates < 1 or min_candidates < 1:
+    if max_frame_gap < 1 or max_candidates < 1 or min_candidates < 1 or references_per_candidate < 1:
         raise ValueError("gap and candidate limits must be positive")
     cameras = list(canonical_cameras.values()) if isinstance(canonical_cameras, Mapping) else list(canonical_cameras)
     zones = _as_zones(weak_zones)
@@ -65,6 +74,9 @@ def plan_weak_zone_recovery(
         name = str(row.get("name"))
         if name in selected_names:
             continue
+        if fail_closed and row.get("segment_geometry_valid") is not True:
+            rejected.append({"name": name, "video": str(row.get("video", row.get("session", "unknown"))), "reason": "SEGMENT_GEOMETRY_INVALID_OR_UNKNOWN"})
+            continue
         video = str(row.get("video", row.get("session", "unknown")))
         idx = int(row.get("frame_index", -1))
         brackets = [r for r in by_video.get(video, []) if int(r["frame_index"]) < idx], [r for r in by_video.get(video, []) if int(r["frame_index"]) > idx]
@@ -80,7 +92,14 @@ def plan_weak_zone_recovery(
         zone_distance = min((max(0.0, float(np.linalg.norm(center - z)) - radius) for z, radius in zones), default=0.0)
         nearby = sorted(((float(np.linalg.norm(center - _center(c))), c) for c in cameras), key=lambda x: (x[0], str(x[1].get("name", ""))))
         novelty = min((d for d, _ in nearby), default=0.0)
-        candidates.append({"name": name, "video": video, "frame_index": idx, "center": center.tolist(), "rotation": rotation.tolist(), "interpolation": {"before": str(before.get("name")), "after": str(after.get("name")), "gap": int(after["frame_index"]) - int(before["frame_index"]), "left_gap": left_gap, "right_gap": right_gap, "uncertainty": float(left_gap + right_gap)}, "score_components": {"weak_zone_proximity": 1.0 / (1.0 + zone_distance), "view_novelty": novelty}, "_sort": (zone_distance, -novelty, video, idx, name)})
+        angles = []
+        lateral = []
+        for _, camera in nearby:
+            dot = float(np.clip(np.dot(rotation @ np.array([0., 0., 1.]), _forward(camera)), -1., 1.))
+            angles.append(float(np.degrees(np.arccos(dot))))
+            lateral.append(float(np.linalg.norm(center - _center(camera))))
+        angle_novelty = min(angles, default=180.0)
+        candidates.append({"name": name, "video": video, "frame_index": idx, "center": center.tolist(), "rotation": rotation.tolist(), "interpolation": {"before": str(before.get("name")), "after": str(after.get("name")), "gap": int(after["frame_index"]) - int(before["frame_index"]), "left_gap": left_gap, "right_gap": right_gap, "uncertainty": float(left_gap + right_gap)}, "score_components": {"weak_zone_proximity": 1.0 / (1.0 + zone_distance), "view_novelty": novelty, "forward_angle_novelty_deg": angle_novelty, "lateral_center_distance": min(lateral, default=0.0)}, "_sort": (zone_distance, -angle_novelty, -novelty, video, idx, name)})
     candidates.sort(key=lambda r: r["_sort"])
     # Round-robin sessions first, then score order: deterministic and balanced.
     chosen = []
@@ -90,7 +109,7 @@ def plan_weak_zone_recovery(
         progressed = False
         for video in videos:
             hit = next((r for r in remaining if r["video"] == video), None)
-            if hit is not None:
+            if hit is not None and all(abs(hit["frame_index"] - r["frame_index"]) >= min_frame_spacing for r in chosen if r["video"] == video):
                 chosen.append(hit)
                 remaining.remove(hit)
                 progressed = True
@@ -106,11 +125,18 @@ def plan_weak_zone_recovery(
     rejected.extend({"name": r["name"], "video": r["video"], "reason": "LOWER_PRIORITY_OR_LIMIT"} for r in candidates if r["name"] not in chosen_names)
     pairs = []
     for candidate in chosen:
-        neighbors = sorted(((float(np.linalg.norm(_center(candidate) - _center(c))), str(c.get("name"))) for c in cameras if str(c.get("name")) != candidate["name"]), key=lambda x: (x[0], x[1]))
-        if neighbors and neighbors[0][0] <= pair_radius:
-            pairs.append({"candidate": candidate["name"], "canonical": neighbors[0][1], "distance": neighbors[0][0], "kind": "candidate_to_canonical"})
-    for a, b in zip(chosen, chosen[1:]):
+        ranked = sorted(((float(np.linalg.norm(_center(candidate) - _center(c))), c) for c in cameras if str(c.get("name")) != candidate["name"]), key=lambda x: (x[0], str(x[1].get("name", ""))))
+        preferred = [item for item in ranked if str(item[1].get("video", item[1].get("session", ""))) != candidate["video"]]
+        ordered = preferred[:references_per_candidate] + [item for item in ranked if item not in preferred[:references_per_candidate]]
+        for distance, reference in ordered[:references_per_candidate]:
+            pairs.append({"candidate": candidate["name"], "canonical": str(reference.get("name")), "canonical_video": str(reference.get("video", reference.get("session", "unknown"))), "distance": distance, "kind": "candidate_to_canonical"})
+    cross_session = [r for r in chosen]
+    for a, b in zip(cross_session, cross_session[1:]):
+        if a["video"] == b["video"]:
+            continue
         distance = float(np.linalg.norm(_center(a) - _center(b)))
         if distance <= pair_radius:
-            pairs.append({"candidate": a["name"], "canonical": b["name"], "distance": distance, "kind": "candidate_to_candidate"})
-    return {"status": "PRE_MATCH_ESTIMATE", "fail_closed": True, "candidates": chosen, "rejected": sorted(rejected, key=lambda r: (r["reason"], r["name"])), "pairs": pairs, "summary": {"candidate_count": len(chosen), "available_count": len(candidates), "rejected_count": len(rejected), "sessions": sorted({r["video"] for r in chosen}), "minimum_target": min_candidates, "minimum_target_met": len(chosen) >= min_candidates or len(candidates) < min_candidates}}
+            pairs.append({"candidate": a["name"], "canonical": b["name"], "candidate_video": a["video"], "canonical_video": b["video"], "distance": distance, "kind": "candidate_to_candidate"})
+    sessions = sorted({r["video"] for r in chosen})
+    ready = len(chosen) >= min_candidates and len(sessions) >= min(3, len({r["video"] for r in candidates}))
+    return {"status": "PRE_MATCH_ESTIMATE", "fail_closed": fail_closed, "candidates": chosen, "rejected": sorted(rejected, key=lambda r: (r["reason"], r["name"])), "pairs": pairs, "summary": {"candidate_count": len(chosen), "available_count": len(candidates), "rejected_count": len(rejected), "sessions": sessions, "minimum_target": min_candidates, "minimum_target_met": len(chosen) >= min_candidates, "readiness": "READY_FOR_GEOMETRY" if ready else "INSUFFICIENT_PREMATCH_CANDIDATES"}}
