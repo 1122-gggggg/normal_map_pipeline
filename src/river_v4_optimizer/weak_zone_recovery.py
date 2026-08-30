@@ -160,10 +160,24 @@ def plan_weak_zone_recovery(
         angle_novelty = min(angles, default=180.0)
         lateral_distance = min(lateral, default=0.0)
         if angle_novelty < minimum_forward_novelty_deg:
-            rejected.append({"name": name, "video": video, "reason": "INSUFFICIENT_FORWARD_NOVELTY", "value": angle_novelty})
+            rejected.append(
+                {
+                    "name": name,
+                    "video": video,
+                    "reason": "INSUFFICIENT_FORWARD_NOVELTY",
+                    "value": angle_novelty,
+                }
+            )
             continue
         if lateral_distance < minimum_lateral_distance:
-            rejected.append({"name": name, "video": video, "reason": "INSUFFICIENT_LATERAL_DISTANCE", "value": lateral_distance})
+            rejected.append(
+                {
+                    "name": name,
+                    "video": video,
+                    "reason": "INSUFFICIENT_LATERAL_DISTANCE",
+                    "value": lateral_distance,
+                }
+            )
             continue
         candidates.append(
             {
@@ -211,7 +225,18 @@ def plan_weak_zone_recovery(
         if not progressed:
             break
     while remaining and len(chosen) < max_candidates:
-        hit = next((r for r in remaining if all(abs(r["frame_index"] - old["frame_index"]) >= min_frame_spacing for old in chosen if old["video"] == r["video"])), None)
+        hit = next(
+            (
+                r
+                for r in remaining
+                if all(
+                    abs(r["frame_index"] - old["frame_index"]) >= min_frame_spacing
+                    for old in chosen
+                    if old["video"] == r["video"]
+                )
+            ),
+            None,
+        )
         if hit is None:
             break
         chosen.append(hit)

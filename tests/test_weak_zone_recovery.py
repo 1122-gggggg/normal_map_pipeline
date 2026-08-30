@@ -222,9 +222,44 @@ def test_spacing_and_three_session_reference_triangle_gates():
 
 
 def test_fill_path_never_bypasses_spacing_and_thresholds_reject_candidates():
-    frames = [{"name": "P1_0000.jpg", "video": "P1", "frame_index": 0, "center": [0, 0, 0], "rotation": np.eye(3).tolist(), "registered": True, "selected": True, "segment_geometry_valid": True}] + [{"name": f"P1_{i:04d}.jpg", "video": "P1", "frame_index": i, "center": [i / 12, 0, 0], "rotation": np.eye(3).tolist(), "registered": i == 120, "selected": i == 120, "segment_geometry_valid": True} for i in range(12, 121, 12)]
-    result = plan_weak_zone_recovery(frames, [], [{"center": [5, 0, 0], "radius": 20}], max_frame_gap=120, max_candidates=20, min_frame_spacing=48, minimum_forward_novelty_deg=10, minimum_lateral_distance=1)
-    assert all(abs(b["frame_index"] - a["frame_index"]) >= 48 for a, b in zip(result["candidates"], result["candidates"][1:]))
+    frames = [
+        {
+            "name": "P1_0000.jpg",
+            "video": "P1",
+            "frame_index": 0,
+            "center": [0, 0, 0],
+            "rotation": np.eye(3).tolist(),
+            "registered": True,
+            "selected": True,
+            "segment_geometry_valid": True,
+        }
+    ] + [
+        {
+            "name": f"P1_{i:04d}.jpg",
+            "video": "P1",
+            "frame_index": i,
+            "center": [i / 12, 0, 0],
+            "rotation": np.eye(3).tolist(),
+            "registered": i == 120,
+            "selected": i == 120,
+            "segment_geometry_valid": True,
+        }
+        for i in range(12, 121, 12)
+    ]
+    result = plan_weak_zone_recovery(
+        frames,
+        [],
+        [{"center": [5, 0, 0], "radius": 20}],
+        max_frame_gap=120,
+        max_candidates=20,
+        min_frame_spacing=48,
+        minimum_forward_novelty_deg=10,
+        minimum_lateral_distance=1,
+    )
+    assert all(
+        abs(b["frame_index"] - a["frame_index"]) >= 48
+        for a, b in zip(result["candidates"], result["candidates"][1:])
+    )
     assert len(result["candidates"]) <= 2
     reasons = {r["reason"] for r in result["rejected"]}
     assert "INSUFFICIENT_FORWARD_NOVELTY" in reasons or "INSUFFICIENT_LATERAL_DISTANCE" in reasons
