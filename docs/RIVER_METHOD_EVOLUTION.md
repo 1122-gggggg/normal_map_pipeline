@@ -219,6 +219,41 @@ Independent audit built two separately solved robust submaps:
 - P168+P167: 148 images, 54,780 points, one 148-image component
 - 59 identical P167 cameras were reserved as shared Sim3 anchors
 
+## 13. Existing-frame weak-zone recovery and diagnosis extensions
+
+The 2026-08-30 extension searched unselected keyframes for lateral novelty and
+cross-session baseline in FIM/ActLoc relative weak cells. Four frames survived
+selection gates, but only one of thirteen EDM candidate pairs was geometrically
+verified. A constrained 348-image rebuild was rejected because track≥5,
+reprojection, graph, weak-image, and BA gates regressed; canonical therefore
+remains unchanged.
+
+The same audit added a conservative point-cloud occlusion proxy, ActLoc Sim3
+scale A/B, and a V3 mapping-disjoint empirical matchability control. The proxy
+changed neither weak-zone ranking nor risk classes; ActLoc rankings were strongly
+scale-sensitive; and empirical matchability reduced heuristic FIM support by
+about fourfold while largely preserving rank. None is a release-authority
+substitute for mesh/depth data or a new group-held-out session.
+
+The decision-unselected count was 819 (1157-338), while the planner actually
+scored 810 frames after excluding the 347-image canonical model. The one
+VERIFIED result is only unique within four selected candidates and thirteen
+planned pairs, not an exhaustive pairwise search. Two P167 candidates were
+ActLoc-only and therefore scale-confounded; the rebuilt P119 candidate was
+FIM-near. The V3 matchability result is likewise a P168-query-conditioned,
+estimated-pose/frustum proxy rather than a GT-backed probability.
+
+Finally, a River-specific robust/dense multi-map localization ensemble was
+implemented as shadow evidence with explicit same-session reference exclusion.
+Because P168 is already in the V4 mapping set, it is not mapping-disjoint and is
+never deployment-authorized. The completed shadow run has 62 queries per layer:
+robust strict accept 4 and dense strict accept 7; ensemble accept 7/reject 55,
+dense-only fallback 4, cross-layer agreement 2, disagreement 1, selected robust 3/dense 4.
+Scene scale is 0.7451629790764298 with 2% scene-scale / 2° gates. Authority is
+`SHADOW_ONLY_NOT_MAPPING_DISJOINT_NOT_DEPLOYABLE` (`mapping_disjoint=false`,
+`deployment_authorized=false`), so it must not be reported as an outer-holdout
+score.
+
 Deterministic RANSAC used 44 training anchors and kept only 24 inliers. The 15
 untouched P167 holdouts had normalized residual p90 0.2298, far above the 0.02
 gate. After alignment, 154 forced pairs with both poses had rotation p90 140.9°

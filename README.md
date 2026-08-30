@@ -23,6 +23,9 @@ FIM／ActLoc 弱區掃描、證據界線與補拍建議見
 [`RIVER_METHOD_EVOLUTION.md`](docs/RIVER_METHOD_EVOLUTION.md)、
 [`RIVER_REUSABLE_PLAYBOOK.md`](docs/RIVER_REUSABLE_PLAYBOOK.md) 與
 [`RIVER_REJECTED_EXPERIMENTS.md`](docs/RIVER_REJECTED_EXPERIMENTS.md)。
+本輪既有影格搜尋、occlusion FIM、ActLoc scale A/B、matchability control
+與 shadow ensemble 記錄見
+[`RIVER_V4_EXTENDED_OPTIMIZATION_20260830.md`](docs/RIVER_V4_EXTENDED_OPTIMIZATION_20260830.md)。
 
 ```bash
 uv sync --all-extras --group dev
