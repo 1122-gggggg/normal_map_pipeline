@@ -111,7 +111,14 @@ def run_adapter_request(
     output_validation.parent.mkdir(parents=True, exist_ok=True)
     result_payload = result.to_dict()
     result_payload["heldout_provenance"] = holdout_provenance
-    result_payload["map_query_identity_overlap"] = False
+    overlap = bool(config.get("map_query_identity_overlap", False))
+    evidence_class = str(config.get("evidence_class") or "mapping_disjoint_holdout")
+    result_payload["evidence_class"] = evidence_class
+    result_payload["map_query_identity_overlap"] = overlap
+    result_payload["mapping_disjoint"] = not overlap
+    result_payload["excluded_query_session_ids"] = sorted(queries)
+    if overlap:
+        result_payload["status"] = "SHADOW_GROUP_REFERENCE_EXCLUSION"
     output_validation.write_text(json.dumps(result_payload, indent=2) + "\n", encoding="utf-8")
     references = []
     for role in _jsonl(roles_path):
@@ -134,6 +141,8 @@ def run_adapter_request(
         "outputs": [str(output_validation), str(output_references)],
         "queries": len(result.results),
         "strict_loo": result.strict_loo,
+        "evidence_class": evidence_class,
+        "map_query_identity_overlap": overlap,
     }
 
 

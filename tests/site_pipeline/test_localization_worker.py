@@ -90,6 +90,7 @@ def test_localization_worker_rejects_query_session_not_declared_holdout(tmp_path
             }
         )
     )
+
     metadata = tmp_path / "metadata.csv"
     with metadata.open("w", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=["source_id", "session_id"])
@@ -110,3 +111,29 @@ def test_localization_worker_rejects_query_session_not_declared_holdout(tmp_path
             },
             provider_factory=lambda _: Provider(),
         )
+
+
+def test_overlap_is_explicitly_marked_and_never_claims_mapping_disjoint(tmp_path) -> None:
+    queries = tmp_path / "queries.jsonl"
+    queries.write_text(json.dumps({"query_id": "q1", "session_id": "P168", "timestamp": 0.0}) + "\n")
+    roles = tmp_path / "roles.jsonl"
+    roles.write_text("{}\n")
+    validation, references = tmp_path / "validation.json", tmp_path / "references.jsonl"
+
+    run_adapter_request(
+        {
+            "config": {
+                "query_manifest": str(queries),
+                "evidence_class": "shadow_reference_overlap",
+                "map_query_identity_overlap": True,
+            },
+            "payload": {"roles": str(roles), "output_validation": str(validation), "output_references": str(references)},
+        },
+        provider_factory=lambda _: Provider(),
+    )
+    payload = json.loads(validation.read_text())
+    assert payload["evidence_class"] == "shadow_reference_overlap"
+    assert payload["map_query_identity_overlap"] is True
+    assert payload["status"] == "SHADOW_GROUP_REFERENCE_EXCLUSION"
+    assert payload["mapping_disjoint"] is False
+    assert payload["excluded_query_session_ids"] == ["P168"]
