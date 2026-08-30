@@ -387,6 +387,7 @@ def evaluate_geometry_gate(
     baseline_registered = int(baseline.get("registered_images") or 0)
     candidate_registered = int(candidate.get("registered_images") or 0)
     checks = {
+        "fixed_intrinsics_unchanged": baseline.get("cameras") == candidate.get("cameras"),
         "registered_images_non_regression": candidate_registered >= baseline_registered,
         "reprojection_p90_within_five_percent": _within_upper_tolerance(
             baseline.get("point_error_p90_px"), candidate.get("point_error_p90_px"), tolerance
@@ -455,7 +456,18 @@ def evaluate_localization_gate(
 def _load_metrics(model: Path) -> dict[str, Any]:
     import pycolmap
 
-    return reconstruction_metrics(pycolmap.Reconstruction(str(model)))
+    reconstruction = pycolmap.Reconstruction(str(model))
+    metrics = reconstruction_metrics(reconstruction)
+    metrics["cameras"] = {
+        str(camera_id): {
+            "model": camera.model_name,
+            "width": int(camera.width),
+            "height": int(camera.height),
+            "params": [float(value) for value in camera.params],
+        }
+        for camera_id, camera in sorted(reconstruction.cameras.items())
+    }
+    return metrics
 
 
 def _within_upper_tolerance(baseline: Any, candidate: Any, tolerance: float) -> bool:

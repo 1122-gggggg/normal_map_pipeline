@@ -8,6 +8,7 @@ import pytest
 from sfm_diagnosis.site_pipeline.map_refinement import (
     RefinementRequest,
     build_backend_command,
+    evaluate_geometry_gate,
     evaluate_localization_gate,
     flatten_image_name,
 )
@@ -184,3 +185,23 @@ def test_localization_gate_fails_when_one_baseline_success_is_lost() -> None:
 
     assert result["passes"] is False
     assert result["lost_baseline_successes"] == ["q1"]
+
+
+def test_geometry_gate_rejects_a_candidate_that_changes_fixed_intrinsics() -> None:
+    baseline = {
+        "registered_images": 10,
+        "observations": 100,
+        "track_length_p50": 5.0,
+        "point_error_p90_px": 1.0,
+        "point_error_p99_px": 1.5,
+        "cameras": {"1": {"model": "PINHOLE", "params": [1000.0, 999.0, 640.0, 360.0]}},
+    }
+    candidate = {
+        **baseline,
+        "cameras": {"1": {"model": "PINHOLE", "params": [980.0, 970.0, 640.0, 360.0]}},
+    }
+
+    result = evaluate_geometry_gate(baseline, candidate)
+
+    assert result["passes"] is False
+    assert result["checks"]["fixed_intrinsics_unchanged"] is False
