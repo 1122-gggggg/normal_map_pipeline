@@ -88,6 +88,30 @@ def build_parser() -> argparse.ArgumentParser:
     fuse.add_argument("--maximum-rotation-deg", type=float, default=2.0)
     fuse.add_argument("--target-rate", type=float, default=0.95)
     fuse.add_argument("--outer-holdout-frozen", action="store_true")
+
+    refinement = commands.add_parser(
+        "refine-map", help="Run an immutable PixSfM or Dense-SfM candidate refinement"
+    )
+    refinement.add_argument(
+        "--backend", choices=("pixsfm", "densesfm-refine", "densesfm-full"), required=True
+    )
+    refinement.add_argument("--input-model", type=Path, required=True)
+    refinement.add_argument("--images", type=Path, required=True)
+    refinement.add_argument("--pairs", type=Path)
+    refinement.add_argument("--intrinsics", type=Path, required=True)
+    refinement.add_argument("--run", type=Path, required=True)
+    refinement.add_argument("--cache-dir", type=Path)
+    refinement.add_argument("--runtime-python", type=Path, required=True)
+    refinement.add_argument("--runtime-root", type=Path)
+    refinement.add_argument("--timeout-seconds", type=int, default=86_400)
+    refinement.add_argument("--max-cache-gb", type=int, default=500)
+    refinement.add_argument("--max-reprojection-error-px", type=float, default=3.0)
+    refinement.add_argument("--minimum-triangulation-angle-deg", type=float, default=1.5)
+    refinement.add_argument("--minimum-track-length", type=int, default=3)
+    refinement.add_argument("--bundle-adjustment-iterations", type=int, default=100)
+    refinement.add_argument("--bundle-adjustment-threads", type=int, default=8)
+    refinement.add_argument("--dry-run", action="store_true")
+    refinement.add_argument("--resume", action="store_true")
     return parser
 
 
@@ -164,6 +188,32 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                 )
             }
+        elif args.command == "refine-map":
+            from .map_refinement import RefinementRequest, run_refinement
+            from .robust_filter import RobustFilterConfig
+
+            cache_dir = args.cache_dir or (args.run.parent / "refinement_cache" / args.backend)
+            request = RefinementRequest(
+                backend=args.backend,
+                input_model=args.input_model,
+                images=args.images,
+                intrinsics=args.intrinsics,
+                pairs=args.pairs,
+                run_dir=args.run,
+                cache_dir=cache_dir,
+                runtime_python=args.runtime_python,
+                runtime_root=args.runtime_root,
+                timeout_seconds=args.timeout_seconds,
+                max_cache_gb=args.max_cache_gb,
+                robust_filter=RobustFilterConfig(
+                    max_reprojection_error_px=args.max_reprojection_error_px,
+                    minimum_triangulation_angle_deg=args.minimum_triangulation_angle_deg,
+                    minimum_track_length=args.minimum_track_length,
+                    bundle_adjustment_iterations=args.bundle_adjustment_iterations,
+                    bundle_adjustment_threads=args.bundle_adjustment_threads,
+                ),
+            )
+            payload = run_refinement(request, dry_run=args.dry_run, resume=args.resume)
         else:
             pipeline = SitePipeline.open(args.run)
             if args.command == "run":

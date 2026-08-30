@@ -76,3 +76,22 @@ def test_cli_has_init_run_status_approve_export_and_backfill_commands() -> None:
         ).command
         == "fuse-localization"
     )
+    refinement = parser.parse_args(
+        [
+            "refine-map",
+            "--backend",
+            "pixsfm",
+            "--input-model",
+            "model",
+            "--images",
+            "images",
+            "--intrinsics",
+            "intrinsics.json",
+            "--run",
+            "run",
+            "--runtime-python",
+            "/runtime/python",
+        ]
+    )
+    assert refinement.command == "refine-map"
+    assert refinement.backend == "pixsfm"
