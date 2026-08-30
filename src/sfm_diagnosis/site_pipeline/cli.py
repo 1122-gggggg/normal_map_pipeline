@@ -105,6 +105,7 @@ def build_parser() -> argparse.ArgumentParser:
     refinement.add_argument("--runtime-root", type=Path)
     refinement.add_argument("--timeout-seconds", type=int, default=86_400)
     refinement.add_argument("--max-cache-gb", type=int, default=500)
+    refinement.add_argument("--pixsfm-patch-size", type=int, default=4)
     refinement.add_argument("--max-reprojection-error-px", type=float, default=3.0)
     refinement.add_argument("--minimum-triangulation-angle-deg", type=float, default=1.5)
     refinement.add_argument("--minimum-track-length", type=int, default=3)
@@ -205,6 +206,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 runtime_root=args.runtime_root,
                 timeout_seconds=args.timeout_seconds,
                 max_cache_gb=args.max_cache_gb,
+                pixsfm_patch_size=args.pixsfm_patch_size,
                 robust_filter=RobustFilterConfig(
                     max_reprojection_error_px=args.max_reprojection_error_px,
                     minimum_triangulation_angle_deg=args.minimum_triangulation_angle_deg,

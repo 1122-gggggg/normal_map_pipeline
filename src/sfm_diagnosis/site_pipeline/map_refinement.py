@@ -41,6 +41,7 @@ class RefinementRequest:
     runtime_root: Path | None = None
     timeout_seconds: int = 86_400
     max_cache_gb: int = 500
+    pixsfm_patch_size: int = 4
     robust_filter: RobustFilterConfig = RobustFilterConfig()
 
     def with_runtime_root(self, value: Path) -> "RefinementRequest":
@@ -48,6 +49,9 @@ class RefinementRequest:
 
     def with_run_dir(self, value: Path) -> "RefinementRequest":
         return replace(self, run_dir=value)
+
+    def with_pixsfm_patch_size(self, value: int) -> "RefinementRequest":
+        return replace(self, pixsfm_patch_size=value)
 
     @property
     def raw_model(self) -> Path:
@@ -101,6 +105,8 @@ class RefinementRequest:
             raise ValueError("timeout must be positive")
         if self.max_cache_gb <= 0:
             raise ValueError("cache budget must be positive")
+        if not 2 <= self.pixsfm_patch_size <= 8:
+            raise ValueError("PixSfM patch size must be between 2 and 8")
 
     def fingerprint(self) -> str:
         self.validate()
@@ -116,6 +122,7 @@ class RefinementRequest:
             ),
             "timeout_seconds": self.timeout_seconds,
             "max_cache_gb": self.max_cache_gb,
+            "pixsfm_patch_size": self.pixsfm_patch_size,
             "robust_filter": asdict(self.robust_filter),
         }
         return _json_hash(payload)
@@ -148,7 +155,7 @@ def build_backend_command(request: RefinementRequest) -> tuple[str, ...]:
             # Four-pixel in-memory sparse patches retain the official
             # low-memory strategy while keeping River V3 within host RAM.
             "mapping.dense_features.use_cache=false",
-            "mapping.dense_features.patch_size=4",
+            f"mapping.dense_features.patch_size={request.pixsfm_patch_size}",
             "mapping.BA.optimizer.refine_focal_length=false",
             "mapping.BA.optimizer.refine_principal_point=false",
             "mapping.BA.optimizer.refine_extra_params=false",
@@ -283,6 +290,7 @@ def run_refinement(
         "command": list(command),
         "fixed_intrinsics": True,
         "refine_extrinsics": True,
+        "pixsfm_patch_size": request.pixsfm_patch_size,
         "pixsfm_hdf5_fallback": (
             "IN_MEMORY_SPARSE_PATCHES_SIZE_4" if request.backend == "pixsfm" else None
         ),

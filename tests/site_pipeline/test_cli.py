@@ -91,7 +91,10 @@ def test_cli_has_init_run_status_approve_export_and_backfill_commands() -> None:
             "run",
             "--runtime-python",
             "/runtime/python",
+            "--pixsfm-patch-size",
+            "6",
         ]
     )
     assert refinement.command == "refine-map"
     assert refinement.backend == "pixsfm"
+    assert refinement.pixsfm_patch_size == 6

@@ -85,6 +85,14 @@ def test_dense_refinement_command_uses_external_checkout_and_generated_config(
     assert "--triangulation_mode" not in command
 
 
+def test_pixsfm_patch_size_is_an_explicit_mapping_only_configuration(tmp_path: Path) -> None:
+    request = _request(tmp_path).with_pixsfm_patch_size(6)
+
+    command = build_backend_command(request)
+
+    assert "mapping.dense_features.patch_size=6" in command
+
+
 def test_dense_full_requires_a_frozen_pair_manifest(tmp_path: Path) -> None:
     request = _request(tmp_path, backend="densesfm-full")
 
