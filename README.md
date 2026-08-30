@@ -88,4 +88,23 @@ uv run ruff check src tests
 uv run pytest
 ```
 
+## Optional map refinement backends
+
+`python -m sfm_diagnosis.site_pipeline.cli refine-map` runs PixSfM existing-model
+featuremetric BA or the public Dense-SfM refinement implementation in an isolated
+runtime, then applies the same fixed-intrinsics robust filter used by the
+canonical pipeline. Outputs are immutable candidate runs; the command refuses
+to write inside the input model and records a content-bound receipt.
+
+- PixSfM uses the official existing-model bundle-adjuster and low-memory
+  configuration: https://github.com/cvg/pixel-perfect-sfm#bundle-adjustment
+- Dense-SfM uses the official public refinement entrypoint, which does not
+  include the paper's Gaussian-Splatting track extension:
+  https://github.com/IceTea-CV/DenseSfM-Refine#usage
+
+Promotion fails closed on fixed intrinsics, registration, observations,
+reprojection, multi-view tracks, 15-landmark components, articulation/bridge
+regressions, and Sim3-aligned camera drift. A held-out localization run is only
+permitted after these mapping-only gates pass.
+
 License: MIT。
