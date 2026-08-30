@@ -143,10 +143,20 @@ def build_backend_command(request: RefinementRequest) -> tuple[str, ...]:
             "--config",
             "low_memory",
             "mapping.dense_features.overwrite_cache=false",
+            # The retained PixSfM extension is linked to HDF5 2.1 and its
+            # chunked FeatureSet cache rejects datatype handles at runtime.
+            # Four-pixel in-memory sparse patches retain the official
+            # low-memory strategy while keeping River V3 within host RAM.
+            "mapping.dense_features.use_cache=false",
+            "mapping.dense_features.patch_size=4",
             "mapping.BA.optimizer.refine_focal_length=false",
             "mapping.BA.optimizer.refine_principal_point=false",
             "mapping.BA.optimizer.refine_extra_params=false",
             "mapping.BA.optimizer.refine_extrinsics=true",
+            # HDF5 feature caches are not thread-safe in the retained PixSfM
+            # runtime.  Serial extraction avoids cross-thread datatype handles.
+            "mapping.BA.references.num_threads=1",
+            "mapping.BA.costmaps.num_threads=1",
         )
     root = request.runtime_root.expanduser().resolve()  # type: ignore[union-attr]
     if request.backend == "densesfm-refine":
@@ -273,6 +283,9 @@ def run_refinement(
         "command": list(command),
         "fixed_intrinsics": True,
         "refine_extrinsics": True,
+        "pixsfm_hdf5_fallback": (
+            "IN_MEMORY_SPARSE_PATCHES_SIZE_4" if request.backend == "pixsfm" else None
+        ),
     }
     (request.run_dir / "request.json").write_text(
         json.dumps(request_payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"

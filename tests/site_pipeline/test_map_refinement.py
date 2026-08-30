@@ -59,6 +59,10 @@ def test_pixsfm_command_uses_low_memory_cache_fixed_intrinsics_and_refines_poses
     assert "mapping.BA.optimizer.refine_principal_point=false" in command
     assert "mapping.BA.optimizer.refine_extra_params=false" in command
     assert "mapping.BA.optimizer.refine_extrinsics=true" in command
+    assert "mapping.BA.references.num_threads=1" in command
+    assert "mapping.BA.costmaps.num_threads=1" in command
+    assert "mapping.dense_features.use_cache=false" in command
+    assert "mapping.dense_features.patch_size=4" in command
     assert str(request.cache_dir / "s2dnet_featuremaps_sparse.h5") in command
 
 
