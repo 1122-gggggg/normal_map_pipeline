@@ -36,9 +36,13 @@ class SpatialDiagnostic:
     actloc_source: str = "disabled"
 
     visible_landmarks: int = 0
+    raw_visible_landmarks: int | None = None
+    occluded_count: int = 0
+    occlusion_uncertain_count: int = 0
     effective_landmarks: float = 0.0
     visibility_source: str = "frustum_only"
     occlusion_verified: bool = False
+    occlusion_proxy_applied: bool = False
     matchability_source: str = "heuristic"
 
     median_track_length: float | None = None

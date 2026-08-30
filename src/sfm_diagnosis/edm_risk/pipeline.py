@@ -93,6 +93,7 @@ class EDMRiskDiagnosis:
         matchability=None,
         fim_config: FIMConfig | None = None,
         actloc_provider: ActLocProvider | None = None,
+        occlusion_proxy=None,
     ) -> DiagnosisRun:
         grid = SpatialPoseGrid.from_map(self.map_data, config)
         intrinsics = self.map_data.median_intrinsics
@@ -107,13 +108,25 @@ class EDMRiskDiagnosis:
                 intrinsics=intrinsics,
                 max_distance=config.max_landmark_distance,
             )
+            raw_visible_count = len(visible.point_indices)
+            occlusion_result = None
+            if occlusion_proxy is not None and raw_visible_count:
+                occlusion_result = occlusion_proxy.filter(
+                    pose, self.map_data.points_xyz[visible.point_indices]
+                )
+                keep = occlusion_result.visible
+                visible = type(visible)(
+                    visible.point_indices[keep],
+                    visible.camera_points[keep],
+                    visible.distances[keep],
+                    visible.uv[keep],
+                    visible.geometric_weights[keep],
+                )
             indices = visible.point_indices
             track_lengths = self.map_data.track_lengths[indices]
             errors = self.map_data.point_errors[indices]
             angles = self.map_data.triangulation_angles_deg(indices)
-            observer_counts = _observer_counts(
-                self.map_data.track_image_ids, indices, image_lookup
-            )
+            observer_counts = _observer_counts(self.map_data.track_image_ids, indices, image_lookup)
             observer_indices = np.asarray(
                 [image_lookup[image_id] for image_id in observer_counts], dtype=int
             )
@@ -123,9 +136,7 @@ class EDMRiskDiagnosis:
                 else np.empty((0, 3))
             )
             covisibility = (
-                max(observer_counts.values()) / max(len(indices), 1)
-                if observer_counts
-                else None
+                max(observer_counts.values()) / max(len(indices), 1) if observer_counts else None
             )
             fim = matchability_aware_fim(
                 self.map_data,
@@ -157,6 +168,16 @@ class EDMRiskDiagnosis:
                 ),
                 actloc_source=actloc.source,
                 visible_landmarks=int(len(indices)),
+                raw_visible_landmarks=raw_visible_count,
+                occluded_count=0 if occlusion_result is None else occlusion_result.occluded_count,
+                occlusion_uncertain_count=0
+                if occlusion_result is None
+                else occlusion_result.uncertain_count,
+                visibility_source="point_cloud_depth_proxy"
+                if occlusion_proxy is not None
+                else "frustum_only",
+                occlusion_verified=False,
+                occlusion_proxy_applied=occlusion_proxy is not None,
                 effective_landmarks=float(np.sum(fim.weights)),
                 matchability_source=fim.matchability_source,
                 median_track_length=_percentile(track_lengths, 50),
@@ -172,9 +193,7 @@ class EDMRiskDiagnosis:
                 view_entropy=view_entropy,
                 convex_hull_coverage=normalized_convex_hull_area(visible.uv, intrinsics),
                 grid_occupancy=image_grid_occupancy(visible.uv, intrinsics),
-                landmark_spatial_entropy=_spatial_entropy(
-                    self.map_data.points_xyz[indices]
-                ),
+                landmark_spatial_entropy=_spatial_entropy(self.map_data.points_xyz[indices]),
                 median_reprojection_error=_percentile(errors, 50),
                 reprojection_error_p90=_percentile(errors, 90),
                 positive_depth_ratio=1.0 if len(indices) else None,
@@ -198,9 +217,7 @@ class EDMRiskDiagnosis:
                 fim_a_opt=fim.metrics.fim_a_opt,
                 fim_d_opt=fim.metrics.fim_d_opt,
                 fim_e_opt=fim.metrics.fim_e_opt,
-                fim_translation_min_eigenvalue=(
-                    fim.metrics.translation_min_eigenvalue
-                ),
+                fim_translation_min_eigenvalue=(fim.metrics.translation_min_eigenvalue),
                 fim_rotation_min_eigenvalue=fim.metrics.rotation_min_eigenvalue,
                 weakest_eigenvector=fim.metrics.weakest_eigenvector.tolist(),
                 degeneracy_flags=list(degeneracy.flags),
@@ -220,6 +237,11 @@ class EDMRiskDiagnosis:
                 "map_source": self.map_data.metadata.get("source"),
                 "probability_status": "UNCALIBRATED_UNKNOWN",
                 "actloc_source": actloc.source,
+                "occlusion": (
+                    occlusion_proxy.metadata()
+                    if occlusion_proxy is not None
+                    else {"mode": "frustum_only", "source": "none"}
+                ),
                 "fim_config": {
                     "pixel_sigma": (fim_config or FIMConfig()).pixel_sigma,
                     "translation_scale": (fim_config or FIMConfig()).translation_scale,
@@ -237,6 +259,7 @@ class EDMRiskDiagnosis:
         matchability=None,
         fim_config: FIMConfig | None = None,
         actloc_provider: ActLocProvider | None = None,
+        occlusion_proxy=None,
         calibration_config=None,
         ambiguity_by_query=None,
         risk_feature_set: str = "F",
@@ -264,6 +287,7 @@ class EDMRiskDiagnosis:
             matchability=matchability,
             fim_config=fim_config,
             actloc_provider=actloc_provider,
+            occlusion_proxy=occlusion_proxy,
         )
         rows = list(fast.rows)
         empirical_receipt = enrich_rows_with_edm(rows, edm_results)
@@ -275,9 +299,7 @@ class EDMRiskDiagnosis:
             max_position_distance=max(config.voxel_size * 2.0, 1e-6),
             max_orientation_distance_deg=max(config.yaw_step_deg, 30.0),
         )
-        ambiguity_receipt = enrich_rows_with_ambiguity(
-            rows, edm_results, ambiguity_by_query or {}
-        )
+        ambiguity_receipt = enrich_rows_with_ambiguity(rows, edm_results, ambiguity_by_query or {})
         calibration = RiskCalibrator(calibration_config).fit(
             select_variant_samples(samples, risk_feature_set)
         )
@@ -421,7 +443,4 @@ def _observer_counts(track_image_ids, point_indices, image_lookup) -> dict[int, 
         assume_unique=False,
     )
     unique, counts = np.unique(observer_ids[registered], return_counts=True)
-    return {
-        int(image_id): int(count)
-        for image_id, count in zip(unique, counts)
-    }
+    return {int(image_id): int(count) for image_id, count in zip(unique, counts)}

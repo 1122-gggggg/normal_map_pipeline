@@ -18,6 +18,7 @@ from .fim import FIMConfig
 from .actloc_provider import build_actloc_provider
 from .grid import SpatialGridConfig
 from .pipeline import EDMRiskDiagnosis
+from .occlusion import PointCloudOcclusionProxy, load_point_cloud
 
 
 def parse_pitch_values(value: str) -> tuple[float, ...]:
@@ -33,22 +34,16 @@ def parse_pitch_values(value: str) -> tuple[float, ...]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="edm-risk-diagnosis",
-        description=(
-            "Predict post-map EDM localization failure risk over an XYZ/yaw/pitch grid."
-        ),
+        description=("Predict post-map EDM localization failure risk over an XYZ/yaw/pitch grid."),
     )
     parser.add_argument("--map", dest="map_path", type=Path, required=True)
     parser.add_argument("--map-adapter", choices=("colmap", "gluemap"), default="gluemap")
     parser.add_argument("--sessions", type=Path)
     parser.add_argument("--mode", choices=("fast", "full"), default="fast")
     parser.add_argument("--edm-results", type=Path)
-    parser.add_argument(
-        "--edm-format", choices=("auto", "canonical", "river"), default="auto"
-    )
+    parser.add_argument("--edm-format", choices=("auto", "canonical", "river"), default="auto")
     parser.add_argument("--ambiguity-results", type=Path)
-    parser.add_argument(
-        "--loo-mode", choices=("strict", "reference-exclusion"), default="strict"
-    )
+    parser.add_argument("--loo-mode", choices=("strict", "reference-exclusion"), default="strict")
     parser.add_argument(
         "--calibration-model",
         choices=("logistic", "hist_gradient_boosting"),
@@ -85,7 +80,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="below this out-of-fold ROC-AUC the run is UNCALIBRATED_EDM_LOO",
     )
     parser.add_argument("--voxel-size", type=float, default=1.0)
-    parser.add_argument("--bounds", type=float, nargs=6, metavar=("X0", "Y0", "Z0", "X1", "Y1", "Z1"))
+    parser.add_argument(
+        "--bounds", type=float, nargs=6, metavar=("X0", "Y0", "Z0", "X1", "Y1", "Z1")
+    )
     parser.add_argument("--padding", type=float, default=0.0)
     parser.add_argument("--yaw-step", type=float, default=30.0)
     parser.add_argument("--pitch-values", type=parse_pitch_values, default=(-30.0, 0.0, 30.0))
@@ -112,6 +109,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--actloc-checkpoint", type=Path)
     parser.add_argument("--actloc-cache", type=Path)
     parser.add_argument("--actloc-fail-closed", action="store_true")
+    parser.add_argument("--occlusion-point-cloud", type=Path)
+    parser.add_argument("--occlusion-splat-radius-px", type=int, default=1)
+    parser.add_argument("--occlusion-depth-tolerance", type=float, default=0.05)
+    parser.add_argument("--occlusion-angle-tolerance-deg", type=float, default=2.0)
+    parser.add_argument("--occlusion-min-support-count", type=int, default=2)
+    parser.add_argument("--occlusion-max-depth-spread", type=float, default=0.25)
+    parser.add_argument("--occlusion-max-search-radius-px", type=int, default=4)
     parser.add_argument("--output", type=Path, required=True)
     return parser
 
@@ -141,9 +145,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else colorize_map_from_observations(map_data, args.color_images)
     )
     matchability = (
-        None
-        if args.matchability is None
-        else load_matchability_source(args.matchability, map_data)
+        None if args.matchability is None else load_matchability_source(args.matchability, map_data)
     )
     fim_config = FIMConfig(
         pixel_sigma=args.pixel_sigma,
@@ -158,6 +160,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         cache_dir=args.actloc_cache,
         fail_open=not args.actloc_fail_closed,
     )
+    occlusion = None
+    if args.occlusion_point_cloud is not None:
+        occlusion = PointCloudOcclusionProxy(
+            load_point_cloud(args.occlusion_point_cloud),
+            map_data.median_intrinsics,
+            splat_radius_px=args.occlusion_splat_radius_px,
+            depth_tolerance=args.occlusion_depth_tolerance,
+            angle_tolerance_deg=args.occlusion_angle_tolerance_deg,
+            min_support_count=args.occlusion_min_support_count,
+            max_depth_spread=args.occlusion_max_depth_spread,
+            max_search_radius_px=args.occlusion_max_search_radius_px,
+            source_path=args.occlusion_point_cloud,
+        )
     edm_results = []
     if args.mode == "full":
         edm_results = filter_edm_results(
@@ -189,6 +204,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             calibration_config=calibration_config,
             ambiguity_by_query=ambiguity,
             risk_feature_set=args.risk_feature_set,
+            occlusion_proxy=occlusion,
         )
     else:
         result = EDMRiskDiagnosis(map_data).run_fast(
@@ -196,6 +212,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             matchability=matchability,
             fim_config=fim_config,
             actloc_provider=actloc,
+            occlusion_proxy=occlusion,
         )
     if colorization is not None:
         result.metadata["rgb_colorization"] = colorization
@@ -246,9 +263,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             },
         )
         write_json(ablation_path, run_ablation(samples, config=calibration_config))
-        outputs.update(
-            {"calibration_samples_json": samples_path, "ablation_json": ablation_path}
-        )
+        outputs.update({"calibration_samples_json": samples_path, "ablation_json": ablation_path})
     print(
         json.dumps(
             {
