@@ -58,6 +58,18 @@ def _resolve_audited_site_packages(
     return path
 
 
+def _configure_audited_runtime_site_packages(path: Path) -> Path:
+    """Point both MegaLoc and official-EDM admission at one audited runtime."""
+
+    resolved = Path(path).resolve(strict=True)
+    import river_map_quality.historical_experiment as historical_runtime
+    import river_map_quality.official_edm_adapter_loo as official_edm
+
+    historical_runtime.AUDITED_TORCH_SITE_PACKAGES = resolved
+    official_edm.AUDITED_EDM_SITE_PACKAGES = resolved
+    return resolved
+
+
 def scaled_pinhole_parameters(
     calibration: Mapping[str, Any], *, width: int, height: int
 ) -> tuple[float, float, float, float]:
@@ -181,7 +193,9 @@ class FinalMapEDMProvider:
         self.lift_distance_px = float(lift_distance_px)
         self.thresholds = {**DEFAULT_THRESHOLDS, **dict(thresholds or {})}
         self.descriptor_batch_size = int(descriptor_batch_size)
-        self.audited_edm_site_packages = _resolve_audited_site_packages(audited_edm_site_packages)
+        self.audited_edm_site_packages = _configure_audited_runtime_site_packages(
+            _resolve_audited_site_packages(audited_edm_site_packages)
+        )
         if self.top_k <= 0 or self.lift_distance_px <= 0 or self.descriptor_batch_size <= 0:
             raise ValueError("localizer top_k, lift distance, and batch size must be positive")
 
@@ -447,9 +461,7 @@ class FinalMapEDMProvider:
         if self._matcher is None:
             import river_map_quality.official_edm_adapter_loo as official_edm
 
-            official_edm.AUDITED_EDM_SITE_PACKAGES = _resolve_audited_site_packages(
-                str(self.audited_edm_site_packages)
-            )
+            _configure_audited_runtime_site_packages(self.audited_edm_site_packages)
             self._matcher = official_edm.load_official_edm_runtime(
                 edm_repo=Path(str(self.edm_config["repo"])),
                 checkpoint=Path(str(self.edm_config["checkpoint"])),

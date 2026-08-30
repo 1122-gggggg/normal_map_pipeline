@@ -1,16 +1,38 @@
 from __future__ import annotations
 
 import sys
+from types import ModuleType
 
 import numpy as np
 
 from sfm_diagnosis.site_pipeline.deployment_localizer import (
+    _configure_audited_runtime_site_packages,
     _prepare_official_pair,
     _resolve_audited_site_packages,
     localization_is_strong,
     rank_reference_indices,
     scaled_pinhole_parameters,
 )
+
+
+def test_configure_audited_runtime_updates_megaloc_and_edm_admission(tmp_path, monkeypatch) -> None:
+    audited = tmp_path / "site-packages"
+    audited.mkdir()
+    package = ModuleType("river_map_quality")
+    package.__path__ = []
+    historical = ModuleType("river_map_quality.historical_experiment")
+    official = ModuleType("river_map_quality.official_edm_adapter_loo")
+    historical.AUDITED_TORCH_SITE_PACKAGES = tmp_path / "retired"
+    official.AUDITED_EDM_SITE_PACKAGES = tmp_path / "retired"
+    monkeypatch.setitem(sys.modules, "river_map_quality", package)
+    monkeypatch.setitem(sys.modules, "river_map_quality.historical_experiment", historical)
+    monkeypatch.setitem(sys.modules, "river_map_quality.official_edm_adapter_loo", official)
+
+    configured = _configure_audited_runtime_site_packages(audited)
+
+    assert configured == audited
+    assert historical.AUDITED_TORCH_SITE_PACKAGES == audited
+    assert official.AUDITED_EDM_SITE_PACKAGES == audited
 
 
 def test_explicit_audited_site_packages_overrides_missing_prefix_path(tmp_path) -> None:
