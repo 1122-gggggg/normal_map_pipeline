@@ -65,7 +65,7 @@ def run_refine(
     import pycolmap
     import yaml
 
-    from src.post_optimization.post_optimization import post_optimization
+    from src.post_optimization.post_optimization import post_optimization  # ty: ignore[unresolved-import]
 
     if staging_dir.exists():
         raise FileExistsError(staging_dir)

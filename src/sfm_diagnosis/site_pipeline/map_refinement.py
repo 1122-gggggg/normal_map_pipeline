@@ -173,7 +173,9 @@ def build_backend_command(request: RefinementRequest) -> tuple[str, ...]:
             "mapping.BA.references.num_threads=1",
             "mapping.BA.costmaps.num_threads=1",
         )
-    root = request.runtime_root.expanduser().resolve()  # type: ignore[union-attr]
+    if request.runtime_root is None:  # guarded by request.validate(), retained for type safety
+        raise ValueError("Dense-SfM requires an external runtime root")
+    root = request.runtime_root.expanduser().resolve()
     if request.backend == "densesfm-refine":
         return (
             python,
@@ -212,7 +214,9 @@ def build_backend_command(request: RefinementRequest) -> tuple[str, ...]:
 
 
 def render_densesfm_config(request: RefinementRequest) -> str:
-    root = request.runtime_root.expanduser().resolve()  # type: ignore[union-attr]
+    if request.runtime_root is None:
+        raise ValueError("Dense-SfM requires an external runtime root")
+    root = request.runtime_root.expanduser().resolve()
     payload = {
         "neuralsfm": {
             "refine_iter_n_times": 2,
