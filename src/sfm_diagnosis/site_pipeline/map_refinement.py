@@ -66,6 +66,14 @@ class RefinementRequest:
         return self.run_dir / "bootstrap" / "densesfm.yaml"
 
     @property
+    def dense_staging(self) -> Path:
+        return self.run_dir / "staging" / "densesfm"
+
+    @property
+    def dense_database(self) -> Path:
+        return self.dense_staging / "database.db"
+
+    @property
     def pixsfm_cache(self) -> Path:
         return self.cache_dir / "s2dnet_featuremaps_sparse.h5"
 
@@ -169,15 +177,21 @@ def build_backend_command(request: RefinementRequest) -> tuple[str, ...]:
     if request.backend == "densesfm-refine":
         return (
             python,
-            str(root / "run_refinement.py"),
+            "-m",
+            "sfm_diagnosis.site_pipeline.densesfm_worker",
+            "refine",
             "--img_folder",
             str(request.images.expanduser().resolve()),
             "--colmap_coarse_dir",
             str(request.input_model.expanduser().resolve()),
+            "--staging-dir",
+            str(request.dense_staging),
             "--refined_colmap_dir",
             str(request.raw_model),
             "--config",
             str(request.dense_config),
+            "--database-path",
+            str(request.dense_database),
         )
     return (
         python,
@@ -395,6 +409,13 @@ def evaluate_geometry_gate(
     }
 
 
+def flatten_image_name(name: str) -> str:
+    """Make hierarchical COLMAP names safe for Dense-SfM's basename-only loader."""
+
+    normalized = name.replace("\\", "/").strip("/")
+    return normalized.replace("/", "__")
+
+
 def evaluate_localization_gate(
     baseline: Mapping[str, Any],
     candidate: Mapping[str, Any],
@@ -484,6 +505,7 @@ __all__ = [
     "build_backend_command",
     "evaluate_geometry_gate",
     "evaluate_localization_gate",
+    "flatten_image_name",
     "render_densesfm_config",
     "run_refinement",
 ]

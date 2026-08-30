@@ -9,6 +9,11 @@ from sfm_diagnosis.site_pipeline.map_refinement import (
     RefinementRequest,
     build_backend_command,
     evaluate_localization_gate,
+    flatten_image_name,
+)
+from sfm_diagnosis.site_pipeline.densesfm_worker import (
+    aggregate_track_matches,
+    open_database_compat,
 )
 
 
@@ -77,12 +82,45 @@ def test_dense_refinement_command_uses_external_checkout_and_generated_config(
 
     command = build_backend_command(request)
 
-    assert command[1] == str(root / "run_refinement.py")
+    assert command[1:4] == ("-m", "sfm_diagnosis.site_pipeline.densesfm_worker", "refine")
     assert "--img_folder" in command
     assert "--colmap_coarse_dir" in command
     assert "--refined_colmap_dir" in command
+    assert "--database-path" in command
     assert "--config" in command
     assert "--triangulation_mode" not in command
+
+
+def test_dense_staging_names_are_reversible_and_collision_safe() -> None:
+    assert flatten_image_name("video-a/frame_000001.jpg") == "video-a__frame_000001.jpg"
+    assert flatten_image_name("video-b/frame_000001.jpg") == "video-b__frame_000001.jpg"
+    assert flatten_image_name("already-flat.jpg") == "already-flat.jpg"
+
+
+def test_dense_database_open_supports_pycolmap_311_instance_api(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    class LegacyDatabase:
+        def open(self, path: str) -> None:
+            calls.append(path)
+
+    database = open_database_compat(LegacyDatabase, tmp_path / "database.db")
+
+    assert isinstance(database, LegacyDatabase)
+    assert calls == [str(tmp_path / "database.db")]
+
+
+def test_dense_database_matches_preserve_point2d_orientation() -> None:
+    matches = aggregate_track_matches(
+        [
+            [(2, 7), (1, 3), (3, 9)],
+            [(1, 4), (2, 8)],
+        ]
+    )
+
+    assert matches[(1, 2)] == [(3, 7), (4, 8)]
+    assert matches[(1, 3)] == [(3, 9)]
+    assert matches[(2, 3)] == [(7, 9)]
 
 
 def test_pixsfm_patch_size_is_an_explicit_mapping_only_configuration(tmp_path: Path) -> None:
