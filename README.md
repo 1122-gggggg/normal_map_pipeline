@@ -105,6 +105,8 @@ to write inside the input model and records a content-bound receipt.
 Promotion fails closed on fixed intrinsics, registration, observations,
 reprojection, multi-view tracks, 15-landmark components, articulation/bridge
 regressions, and Sim3-aligned camera drift. A held-out localization run is only
-permitted after these mapping-only gates pass.
+permitted after these mapping-only gates pass. The `densesfm-full` backend also
+requires the frozen pair manifest and the passing `densesfm-refine` receipt, so
+the full rebuild cannot bypass its continuation gate.
 
 License: MIT。

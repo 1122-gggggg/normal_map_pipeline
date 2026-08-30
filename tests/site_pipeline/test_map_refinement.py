@@ -141,6 +141,19 @@ def test_dense_full_requires_a_frozen_pair_manifest(tmp_path: Path) -> None:
         request.validate()
 
 
+def test_dense_full_requires_a_passing_refinement_continuation_receipt(tmp_path: Path) -> None:
+    pairs = tmp_path / "pairs.jsonl"
+    pairs.write_text("{}\n", encoding="utf-8")
+    request = _request(tmp_path, backend="densesfm-full")
+    root = tmp_path / "DenseSfM-Refine"
+    root.mkdir()
+    (root / "run_full.py").write_text("", encoding="utf-8")
+    request = request.with_runtime_root(root).with_pairs(pairs)
+
+    with pytest.raises(ValueError, match="continuation receipt"):
+        request.validate()
+
+
 def test_refinement_run_must_not_overlap_the_input_model(tmp_path: Path) -> None:
     request = _request(tmp_path)
     request = request.with_run_dir(request.input_model / "candidate")

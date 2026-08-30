@@ -98,3 +98,28 @@ def test_cli_has_init_run_status_approve_export_and_backfill_commands() -> None:
     assert refinement.command == "refine-map"
     assert refinement.backend == "pixsfm"
     assert refinement.pixsfm_patch_size == 6
+
+    dense_full = parser.parse_args(
+        [
+            "refine-map",
+            "--backend",
+            "densesfm-full",
+            "--input-model",
+            "model",
+            "--images",
+            "images",
+            "--pairs",
+            "pairs.jsonl",
+            "--intrinsics",
+            "intrinsics.json",
+            "--run",
+            "run",
+            "--runtime-python",
+            "/runtime/python",
+            "--runtime-root",
+            "DenseSfM-Refine",
+            "--continuation-receipt",
+            "refinement-receipt.json",
+        ]
+    )
+    assert dense_full.continuation_receipt.name == "refinement-receipt.json"

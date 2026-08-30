@@ -39,6 +39,7 @@ class RefinementRequest:
     cache_dir: Path
     runtime_python: Path
     runtime_root: Path | None = None
+    continuation_receipt: Path | None = None
     timeout_seconds: int = 86_400
     max_cache_gb: int = 500
     pixsfm_patch_size: int = 4
@@ -49,6 +50,9 @@ class RefinementRequest:
 
     def with_run_dir(self, value: Path) -> "RefinementRequest":
         return replace(self, run_dir=value)
+
+    def with_pairs(self, value: Path) -> "RefinementRequest":
+        return replace(self, pairs=value)
 
     def with_pixsfm_patch_size(self, value: int) -> "RefinementRequest":
         return replace(self, pixsfm_patch_size=value)
@@ -102,6 +106,15 @@ class RefinementRequest:
             script = "run_refinement.py" if self.backend == "densesfm-refine" else "run_full.py"
             if not (root / script).is_file():
                 raise ValueError(f"Dense-SfM runtime is missing {script}")
+        if self.backend == "densesfm-full":
+            if self.continuation_receipt is None:
+                raise ValueError(
+                    "Dense-SfM full requires a passing refinement continuation receipt"
+                )
+            continuation = self.continuation_receipt.expanduser().resolve(strict=True)
+            payload = json.loads(continuation.read_text(encoding="utf-8"))
+            if not bool((payload.get("geometry_gate") or {}).get("passes")):
+                raise ValueError("Dense-SfM refinement continuation receipt did not pass its gate")
         run = self.run_dir.expanduser().absolute()
         try:
             run.resolve().relative_to(model)
@@ -127,6 +140,9 @@ class RefinementRequest:
             "runtime_python": str(self.runtime_python.expanduser().resolve()),
             "runtime_root": (
                 None if self.runtime_root is None else str(self.runtime_root.expanduser().resolve())
+            ),
+            "continuation_receipt_sha256": (
+                None if self.continuation_receipt is None else _sha256(self.continuation_receipt)
             ),
             "timeout_seconds": self.timeout_seconds,
             "max_cache_gb": self.max_cache_gb,

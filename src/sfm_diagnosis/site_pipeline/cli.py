@@ -103,6 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
     refinement.add_argument("--cache-dir", type=Path)
     refinement.add_argument("--runtime-python", type=Path, required=True)
     refinement.add_argument("--runtime-root", type=Path)
+    refinement.add_argument("--continuation-receipt", type=Path)
     refinement.add_argument("--timeout-seconds", type=int, default=86_400)
     refinement.add_argument("--max-cache-gb", type=int, default=500)
     refinement.add_argument("--pixsfm-patch-size", type=int, default=4)
@@ -204,6 +205,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 cache_dir=cache_dir,
                 runtime_python=args.runtime_python,
                 runtime_root=args.runtime_root,
+                continuation_receipt=args.continuation_receipt,
                 timeout_seconds=args.timeout_seconds,
                 max_cache_gb=args.max_cache_gb,
                 pixsfm_patch_size=args.pixsfm_patch_size,
