@@ -113,7 +113,7 @@ def test_dense_database_open_supports_pycolmap_311_instance_api(tmp_path: Path) 
 def test_dense_database_matches_preserve_point2d_orientation() -> None:
     matches = aggregate_track_matches(
         [
-            [(2, 7), (1, 3), (3, 9)],
+            [(2, 7), (1, 3), (3, 9), (2, 70)],
             [(1, 4), (2, 8)],
         ]
     )

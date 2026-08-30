@@ -189,9 +189,14 @@ def aggregate_track_matches(
 
     matches: defaultdict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
     for track in tracks:
-        for left, right in combinations(track, 2):
-            if left[0] == right[0]:
-                continue
+        # GlueMap may attach multiple Point2D observations from one image to
+        # the same Point3D.  COLMAP's database correspondence graph requires
+        # a one-to-one feature relation per image pair, so keep one stable
+        # representative observation per image for database connectivity.
+        by_image: dict[int, int] = {}
+        for image_id, point2d_idx in track:
+            by_image[image_id] = min(point2d_idx, by_image.get(image_id, point2d_idx))
+        for left, right in combinations(sorted(by_image.items()), 2):
             if left[0] < right[0]:
                 pair = (left[0], right[0])
                 indexes = (left[1], right[1])
