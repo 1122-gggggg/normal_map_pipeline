@@ -22,6 +22,7 @@ from sfm_diagnosis.site_pipeline.gluemap_worker import (
     write_scaled_intrinsics_seed,
     run_adapter_request,
     select_direct_keyframes,
+    resolve_mapping_inputs,
     validate_colmap_pair_database,
 )
 
@@ -267,3 +268,40 @@ def test_direct_selection_uses_every_candidate_and_reads_pose_only_from_keyframe
 
     assert [row["keyframe_id"] for row in selected] == ["v1:1", "v1:2"]
     assert pose_only == {"v1/0002.jpg"}
+
+
+def test_native_mapping_inputs_do_not_require_selection_geometry_or_roles(tmp_path):
+    keyframes = tmp_path / "keyframes.jsonl"
+    keyframes.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "keyframe_id": "v1:1",
+                        "output_name": "v1/0001.jpg",
+                        "status": "CANDIDATE",
+                        "mapping_mode": "TRIANGULATE",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "keyframe_id": "v1:2",
+                        "output_name": "v1/0002.jpg",
+                        "status": "CANDIDATE",
+                        "mapping_mode": "POSE_ONLY",
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    inputs = resolve_mapping_inputs(
+        keyframes_path=keyframes,
+        pair_source="native",
+    )
+
+    assert inputs.selected_ids == frozenset({"v1:1", "v1:2"})
+    assert inputs.pose_names == frozenset({"v1/0002.jpg"})
+    assert inputs.admitted_names is None

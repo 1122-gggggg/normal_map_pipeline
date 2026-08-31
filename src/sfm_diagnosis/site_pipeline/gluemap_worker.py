@@ -17,6 +17,7 @@ import sqlite3
 import sys
 from argparse import Namespace
 from contextlib import nullcontext, redirect_stdout
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
@@ -29,6 +30,14 @@ from .post_sfm import model_capabilities
 Pair = tuple[str, str]
 IndexPair = tuple[int, int]
 COLMAP_MAX_IMAGE_ID = 2_147_483_647
+
+
+@dataclass(frozen=True)
+class MappingInputs:
+    selected: tuple[dict[str, Any], ...]
+    selected_ids: frozenset[str]
+    pose_names: frozenset[str]
+    admitted_names: frozenset[Pair] | None
 
 
 def _canonical(a: str, b: str) -> Pair:
@@ -69,6 +78,65 @@ def select_direct_keyframes(
         if row.get("mapping_mode") == "POSE_ONLY"
     }
     return selected, pose_only
+
+
+def resolve_mapping_inputs(
+    *,
+    keyframes_path: str | Path,
+    pair_source: str,
+    selection_path: str | Path | None = None,
+    geometry_path: str | Path | None = None,
+    mode: str = "final",
+) -> MappingInputs:
+    """Resolve the small input interface for verified or native mapping."""
+
+    keyframes = _jsonl(Path(keyframes_path))
+    if pair_source == "native":
+        selected, pose_names = select_direct_keyframes(keyframes)
+        return MappingInputs(
+            tuple(selected),
+            frozenset(str(row["keyframe_id"]) for row in selected),
+            frozenset(pose_names),
+            None,
+        )
+    if pair_source != "verified":
+        raise ValueError("pair_source must be verified or native")
+    selection_file = Path(str(selection_path or ""))
+    geometry_file = Path(str(geometry_path or ""))
+    if not selection_file.is_file() or not geometry_file.is_file():
+        raise ValueError("verified mapping requires selection and pair_geometry files")
+    selection = json.loads(selection_file.read_text(encoding="utf-8"))
+    selected_ids = set(selection.get("selected_keyframes") or ())
+    if mode == "final" and not selected_ids:
+        active_segments = set(selection.get("active_segments") or ())
+        selected_ids = {
+            str(row["keyframe_id"])
+            for row in keyframes
+            if str(row.get("segment_id")) in active_segments
+        }
+    selected = [row for row in keyframes if str(row.get("keyframe_id")) in selected_ids]
+    if not selected:
+        raise ValueError("GLUEMAP selection contains no keyframes")
+    pairs = [
+        row
+        for row in _jsonl(geometry_file)
+        if row.get("admission") == "VERIFIED"
+        and str(row.get("image_i")) in selected_ids
+        and str(row.get("image_j")) in selected_ids
+    ]
+    if not pairs:
+        raise ValueError("GLUEMAP selection contains no verified pairs")
+    id_to_name = {
+        str(row["keyframe_id"]): str(
+            row.get("output_name") or Path(str(row["image_uri"])).name
+        )
+        for row in selected
+    }
+    admitted = frozenset(
+        _canonical(id_to_name[str(row["image_i"])], id_to_name[str(row["image_j"])])
+        for row in pairs
+    )
+    return MappingInputs(tuple(selected), frozenset(selected_ids), frozenset(), admitted)
 
 
 def _names(dataset: Any) -> list[str]:
@@ -336,6 +404,7 @@ def run_adapter_request(payload: Mapping[str, Any]) -> dict[str, Any]:
     mode = str(config.get("mode") or request_payload.get("mode") or "diagnostic")
     if mode not in {"diagnostic", "final"}:
         raise ValueError("GLUEMAP mode must be diagnostic or final")
+    pair_source = str(config.get("pair_source") or "verified")
     keyframes_path = Path(str(request_payload.get("keyframes") or ""))
     selection_path = Path(str(request_payload.get("selection") or ""))
     geometry_path = Path(str(request_payload.get("pair_geometry") or ""))
@@ -352,43 +421,32 @@ def run_adapter_request(payload: Mapping[str, Any]) -> dict[str, Any]:
     run_root = Path(run_root_value).expanduser().resolve()
     if not run_root.is_dir():
         raise ValueError("GLUEMAP run_root is not an initialized directory")
-    for controlled_path in (keyframes_path, selection_path, geometry_path):
+    controlled_paths = [keyframes_path]
+    if pair_source == "verified":
+        controlled_paths.extend((selection_path, geometry_path))
+    if roles_path.is_file():
+        controlled_paths.append(roles_path)
+    for controlled_path in controlled_paths:
         assert_run_controlled_path(controlled_path, run_root)
     assert_run_controlled_path(output_model, run_root, follow_symlinks=False)
-    if not all(path.is_file() for path in (keyframes_path, selection_path, geometry_path)):
-        raise ValueError("GLUEMAP request requires keyframes, selection and pair_geometry files")
-
-    keyframes = _jsonl(keyframes_path)
-    selection = json.loads(selection_path.read_text(encoding="utf-8"))
-    selected_ids = set(selection.get("selected_keyframes") or ())
-    if mode == "final" and not selected_ids:
-        active_segments = set(selection.get("active_segments") or ())
-        selected_ids = {
-            str(row["keyframe_id"])
-            for row in keyframes
-            if str(row.get("segment_id")) in active_segments
-        }
-    selected = [row for row in keyframes if str(row.get("keyframe_id")) in selected_ids]
-    if not selected:
-        raise ValueError("GLUEMAP selection contains no keyframes")
-    pairs = [
-        row
-        for row in _jsonl(geometry_path)
-        if row.get("admission") == "VERIFIED"
-        and str(row.get("image_i")) in selected_ids
-        and str(row.get("image_j")) in selected_ids
-    ]
-    if not pairs:
-        raise ValueError("GLUEMAP selection contains no verified pairs")
+    if not keyframes_path.is_file():
+        raise ValueError("GLUEMAP request requires keyframes")
+    mapping_inputs = resolve_mapping_inputs(
+        keyframes_path=keyframes_path,
+        pair_source=pair_source,
+        selection_path=selection_path,
+        geometry_path=geometry_path,
+        mode=mode,
+    )
+    selected = list(mapping_inputs.selected)
+    selected_ids = set(mapping_inputs.selected_ids)
+    admitted_names = None if mapping_inputs.admitted_names is None else set(mapping_inputs.admitted_names)
+    pose_names = set(mapping_inputs.pose_names)
     id_to_name = {
         str(row["keyframe_id"]): str(
             row.get("output_name") or Path(str(row["image_uri"])).name
         )
         for row in selected
-    }
-    admitted_names = {
-        _canonical(id_to_name[str(row["image_i"])], id_to_name[str(row["image_j"])])
-        for row in pairs
     }
 
     evidence_level = str(
@@ -414,11 +472,13 @@ def run_adapter_request(payload: Mapping[str, Any]) -> dict[str, Any]:
     identity = workspace_identity(
         output_model.parent,
         sorted(selected_ids),
-        [(row["image_i"], row["image_j"]) for row in pairs],
+        sorted(admitted_names) if admitted_names is not None else ["NATIVE_GLUEMAP_PAIRS"],
         {
             "config": base_config,
             "checkpoints": checkpoint_hashes,
             "intrinsics_calibration": calibration,
+            "pair_source": pair_source,
+            "pose_names": sorted(pose_names),
         },
     )
     workspace_root = resolve_workspace_root(output_model.parent, config.get("workspace_root"))
@@ -462,7 +522,8 @@ def run_adapter_request(payload: Mapping[str, Any]) -> dict[str, Any]:
         gluemap_config["refine_intrinsics"] = False
     cached_model = (
         find_completed_refined_model(workspace)
-        if mode == "diagnostic"
+        if pair_source == "verified"
+        and mode == "diagnostic"
         and evidence_level == "refined_geometry"
         and reuse_inference_cache
         else None
@@ -554,10 +615,19 @@ def run_adapter_request(payload: Mapping[str, Any]) -> dict[str, Any]:
         args.is_sequential = True
         run_preprocessing_pipeline_multi(args, world_size, rank, datasets)
         dataset = MultiSequencePairs(args, datasets)
-        admitted_indices = replace_dataset_pairs(dataset, admitted_names)
+        if admitted_names is None:
+            admitted_indices = {
+                tuple(sorted((int(pair[0]), int(pair[1])))) for pair in dataset.pairs
+            }
+            dataset_names = _names(dataset)
+            admitted_names = {
+                _canonical(dataset_names[left], dataset_names[right])
+                for left, right in admitted_indices
+            }
+        else:
+            admitted_indices = replace_dataset_pairs(dataset, admitted_names)
         assert_exact_pair_set(dataset, admitted_indices)
-        pose_names: set[str] = set()
-        if mode == "final" and roles_path.is_file():
+        if pair_source == "verified" and mode == "final" and roles_path.is_file():
             pose_segments = {
                 str(row.get("segment_id") or row.get("segment"))
                 for row in _jsonl(roles_path)
@@ -643,6 +713,7 @@ def run_adapter_request(payload: Mapping[str, Any]) -> dict[str, Any]:
         "workspace": str(workspace),
         "checkpoint_hashes": checkpoint_hashes,
         "pair_count": len(admitted_indices),
+        "pair_source": pair_source,
         "exact_pair_proof": pair_proof,
         "pose_only_mask": pose_only_state,
         "model_capabilities": capabilities,
