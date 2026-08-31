@@ -88,6 +88,18 @@ uv run ruff check src tests
 uv run pytest
 ```
 
+## Direct all-sequence development mode
+
+`site-sfm-pipeline direct-map` is an explicit non-canonical mode that hashes all
+mapping sources, applies only hard sanitization plus motion-adaptive keyframes,
+and sends every retained sequence into one native GLUEMAP job. Pure rotations are
+kept as pose-only and verified observation-free. The output includes an exact
+source-frame RGB PLY and a MegaLoc descriptor bank for downstream EDM+PnP.
+
+This mode performs no component/subgraph/session selection and no independent
+localization validation. Its receipt is always
+`MAP_BUILT_UNVALIDATED_ALL_INPUTS`, never a deployment authorization.
+
 ## Optional map refinement backends
 
 `python -m sfm_diagnosis.site_pipeline.cli refine-map` runs PixSfM existing-model
