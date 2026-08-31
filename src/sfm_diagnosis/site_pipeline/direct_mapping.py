@@ -9,9 +9,9 @@ import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
-from sfm_diagnosis.io import load_gluemap, write_json
+from sfm_diagnosis.io import write_json
 from sfm_diagnosis.risk_ply import write_binary_ply
 
 from .config import PipelineConfig
@@ -236,22 +236,110 @@ def prepare_direct_run(request: DirectMappingRequest, *, resume: bool = False) -
     return receipt
 
 
-def export_original_rgb_ply(model_dir: str | Path, output_path: str | Path) -> dict[str, Any]:
-    """Export exact COLMAP point colors without display or risk recoloring."""
+def sample_reconstruction_rgb(
+    reconstruction: Any,
+    keyframes: Mapping[str, Mapping[str, Any]],
+    *,
+    image_loader: Callable[[str], Any],
+) -> tuple[Any, Any, dict[str, int]]:
+    """Average decoded RGB observations for every 3D point without recoloring."""
 
-    map_data = load_gluemap(model_dir)
+    import numpy as np
+
+    point_rows = sorted(reconstruction.points3D.items(), key=lambda item: int(item[0]))
+    point_ids = np.asarray([int(point_id) for point_id, _ in point_rows], dtype=np.int64)
+    xyz = np.asarray([point.xyz for _, point in point_rows], dtype=np.float64).reshape(-1, 3)
+    sums = np.zeros((len(point_rows), 3), dtype=np.uint64)
+    counts = np.zeros(len(point_rows), dtype=np.uint32)
+    observations = 0
+    for image in sorted(reconstruction.images.values(), key=lambda value: str(value.name)):
+        name = str(image.name)
+        keyframe = keyframes.get(name)
+        if keyframe is None:
+            raise RuntimeError(f"registered image is absent from keyframes: {name}")
+        pixels = image_loader(str(keyframe["image_uri"]))
+        if pixels is None:
+            raise FileNotFoundError(str(keyframe["image_uri"]))
+        height, width = pixels.shape[:2]
+        material = [point for point in image.points2D if point.has_point3D()]
+        if not material:
+            continue
+        ids = np.asarray([int(point.point3D_id) for point in material], dtype=np.int64)
+        xy = np.asarray([point.xy for point in material], dtype=np.float64).reshape(-1, 2)
+        columns = np.rint(xy[:, 0]).astype(np.int64)
+        rows = np.rint(xy[:, 1]).astype(np.int64)
+        indexes = np.searchsorted(point_ids, ids)
+        valid = (
+            (indexes < len(point_ids))
+            & (point_ids[np.minimum(indexes, len(point_ids) - 1)] == ids)
+            & (columns >= 0)
+            & (columns < width)
+            & (rows >= 0)
+            & (rows < height)
+        )
+        if not np.any(valid):
+            continue
+        indexes = indexes[valid]
+        bgr = np.asarray(pixels[rows[valid], columns[valid], :3], dtype=np.uint8)
+        rgb = bgr[:, ::-1]
+        np.add.at(sums, indexes, rgb.astype(np.uint64))
+        np.add.at(counts, indexes, 1)
+        observations += int(len(indexes))
+    missing = counts == 0
+    colors = np.zeros((len(point_rows), 3), dtype=np.uint8)
+    colors[~missing] = np.rint(
+        sums[~missing] / counts[~missing, None]
+    ).astype(np.uint8)
+    return xyz, colors, {
+        "colored_points": int((~missing).sum()),
+        "missing_color_points": int(missing.sum()),
+        "observations": observations,
+    }
+
+
+def sample_model_rgb(
+    model_dir: str | Path,
+    keyframes_path: str | Path,
+) -> tuple[Any, Any, dict[str, int]]:
+    import cv2
+    import pycolmap
+
+    keyframes = {
+        str(row["output_name"]): row for row in _read_jsonl(Path(keyframes_path))
+    }
+    reconstruction = pycolmap.Reconstruction(str(Path(model_dir).resolve(strict=True)))
+    return sample_reconstruction_rgb(
+        reconstruction,
+        keyframes,
+        image_loader=lambda path: cv2.imread(path, cv2.IMREAD_COLOR),
+    )
+
+
+def export_original_rgb_ply(
+    model_dir: str | Path,
+    keyframes_path: str | Path,
+    output_path: str | Path,
+) -> dict[str, Any]:
+    """Export frame-sampled RGB without display or risk recoloring."""
+
+    xyz, rgb, stats = sample_model_rgb(model_dir, keyframes_path)
+    if stats["missing_color_points"]:
+        raise RuntimeError(
+            f"RGB sampling missed {stats['missing_color_points']} reconstructed points"
+        )
     output = write_binary_ply(
         output_path,
-        map_data.points_xyz,
-        map_data.point_rgb,
-        comments=("original COLMAP point RGB; no recoloring or downsampling",),
+        xyz,
+        rgb,
+        comments=("mean decoded RGB over source-frame track observations; no recoloring",),
     )
     return {
         "schema_version": 1,
         "artifact_type": "ORIGINAL_RGB_PLY_RECEIPT",
         "path": str(output),
-        "vertices": int(len(map_data.points_xyz)),
-        "recolored_points": 0,
+        "vertices": int(len(xyz)),
+        **stats,
+        "aggregation": "MEAN_TRACK_OBSERVATION_RGB",
         "sha256": sha256_file(output),
     }
 
@@ -437,6 +525,7 @@ def run_direct_mapping(
     products = request.run_dir / "products"
     rgb_ply = export_original_rgb_ply(
         output_model,
+        request.run_dir / "artifacts/keyframes/keyframes.jsonl",
         products / "map/original_rgb.ply",
     )
     write_json(products / "map/original_rgb_receipt.json", rgb_ply)
@@ -575,4 +664,6 @@ __all__ = [
     "prepare_direct_run",
     "run_localization_packaging_isolated",
     "run_direct_mapping",
+    "sample_model_rgb",
+    "sample_reconstruction_rgb",
 ]

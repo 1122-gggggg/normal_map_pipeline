@@ -11,6 +11,7 @@ from sfm_diagnosis.site_pipeline.direct_mapping import (
     DirectMappingRuntime,
     export_original_rgb_ply,
     localization_reference_rows,
+    sample_reconstruction_rgb,
     prepare_direct_run,
     run_localization_packaging_isolated,
     run_direct_mapping,
@@ -135,11 +136,18 @@ def test_export_original_rgb_ply_never_recolors_source_points(tmp_path: Path, mo
         point_rgb = np.array([[0, 1, 2], [250, 128, 64]], dtype=np.uint8)
 
     monkeypatch.setattr(
-        "sfm_diagnosis.site_pipeline.direct_mapping.load_gluemap", lambda _path: Map()
+        "sfm_diagnosis.site_pipeline.direct_mapping.sample_model_rgb",
+        lambda _model, _keyframes: (
+            Map.points_xyz,
+            Map.point_rgb,
+            {"colored_points": 2, "missing_color_points": 0},
+        ),
     )
     output = tmp_path / "original_rgb.ply"
+    keyframes = tmp_path / "keyframes.jsonl"
+    keyframes.write_text("", encoding="utf-8")
 
-    receipt = export_original_rgb_ply(tmp_path / "model", output)
+    receipt = export_original_rgb_ply(tmp_path / "model", keyframes, output)
 
     material = output.read_bytes()
     header, vertices = material.split(b"end_header\n", 1)
@@ -148,7 +156,52 @@ def test_export_original_rgb_ply_never_recolors_source_points(tmp_path: Path, mo
     assert b"element vertex 2" in header
     assert first[3:] == (0, 1, 2)
     assert second[3:] == (250, 128, 64)
-    assert receipt["recolored_points"] == 0
+    assert receipt["colored_points"] == 2
+    assert receipt["missing_color_points"] == 0
+
+
+def test_sample_reconstruction_rgb_averages_observation_pixels_and_converts_bgr() -> None:
+    class Point2D:
+        def __init__(self, xy, point_id):
+            self.xy = xy
+            self.point3D_id = point_id
+
+        def has_point3D(self):
+            return True
+
+    class Image:
+        def __init__(self, name, xy):
+            self.name = name
+            self.points2D = [Point2D(xy, 7)]
+
+    class Point3D:
+        xyz = np.array([1.0, 2.0, 3.0])
+
+    class Reconstruction:
+        points3D = {7: Point3D()}
+        images = {
+            1: Image("v1/a.jpg", (1.0, 0.0)),
+            2: Image("v2/b.jpg", (0.0, 1.0)),
+        }
+
+    keyframes = {
+        "v1/a.jpg": {"image_uri": "/a.jpg"},
+        "v2/b.jpg": {"image_uri": "/b.jpg"},
+    }
+    images = {
+        "/a.jpg": np.array([[[0, 0, 0], [30, 20, 10]]], dtype=np.uint8),
+        "/b.jpg": np.array([[[0, 0, 0]], [[90, 60, 30]]], dtype=np.uint8),
+    }
+
+    xyz, rgb, stats = sample_reconstruction_rgb(
+        Reconstruction(),
+        keyframes,
+        image_loader=lambda path: images[path],
+    )
+
+    assert xyz.tolist() == [[1.0, 2.0, 3.0]]
+    assert rgb.tolist() == [[20, 40, 60]]
+    assert stats == {"colored_points": 1, "missing_color_points": 0, "observations": 2}
 
 
 def test_localization_references_exclude_pose_only_and_zero_observation_images() -> None:
@@ -260,10 +313,11 @@ def test_run_direct_mapping_records_unvalidated_outputs(tmp_path: Path, monkeypa
     )
     monkeypatch.setattr(
         "sfm_diagnosis.site_pipeline.direct_mapping.export_original_rgb_ply",
-        lambda _model, output: {
+        lambda _model, _keyframes, output: {
             "path": str(output),
             "vertices": 10,
-            "recolored_points": 0,
+            "colored_points": 10,
+            "missing_color_points": 0,
         },
     )
     monkeypatch.setattr(
@@ -277,7 +331,7 @@ def test_run_direct_mapping_records_unvalidated_outputs(tmp_path: Path, monkeypa
     assert receipt["validation"] == "NONE"
     assert receipt["graph_checks"] == "SKIPPED_BY_REQUEST"
     assert receipt["mapping"]["pair_source"] == "native"
-    assert receipt["rgb_ply"]["recolored_points"] == 0
+    assert receipt["rgb_ply"]["missing_color_points"] == 0
 
 
 def test_localization_packaging_runs_in_a_fresh_python_process(monkeypatch) -> None:
