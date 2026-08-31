@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import gc
 import json
 import re
-import gc
+import subprocess
+import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -402,8 +404,7 @@ def run_direct_mapping(
         encoding="utf-8",
     )
     output_model = request.run_dir / "artifacts/mapping/direct/model"
-    mapping = run_gluemap_adapter(
-        {
+    adapter_payload = {
             "config": {
                 "gluemap_root": str(runtime.gluemap_root),
                 "config_file": str(gluemap_config),
@@ -426,19 +427,39 @@ def run_direct_mapping(
                 "corpus_manifest": str(request.run_dir / "inputs/corpus_manifest.json"),
             },
         }
-    )
+    if resume and _complete_model(output_model):
+        mapping = _recover_completed_mapping(
+            output_model,
+            request.run_dir / "artifacts/keyframes/keyframes.jsonl",
+        )
+    else:
+        mapping = run_gluemap_adapter(adapter_payload)
     products = request.run_dir / "products"
     rgb_ply = export_original_rgb_ply(
         output_model,
         products / "map/original_rgb.ply",
     )
     write_json(products / "map/original_rgb_receipt.json", rgb_ply)
-    localization = build_localization_package(
-        model_dir=output_model,
-        keyframes_path=request.run_dir / "artifacts/keyframes/keyframes.jsonl",
-        output_dir=products / "localization",
-        runtime=runtime,
-        intrinsics=calibration,
+    localization = run_localization_packaging_isolated(
+        {
+            "model_dir": str(output_model),
+            "keyframes_path": str(
+                request.run_dir / "artifacts/keyframes/keyframes.jsonl"
+            ),
+            "output_dir": str(products / "localization"),
+            "runtime": {
+                "gluemap_root": str(runtime.gluemap_root),
+                "base_config_path": str(runtime.base_config_path),
+                "workspace_root": str(runtime.workspace_root),
+                "megaloc_source": str(runtime.megaloc_source),
+                "megaloc_checkpoint": str(runtime.megaloc_checkpoint),
+                "edm_root": None if runtime.edm_root is None else str(runtime.edm_root),
+                "edm_checkpoint": (
+                    None if runtime.edm_checkpoint is None else str(runtime.edm_checkpoint)
+                ),
+            },
+            "intrinsics": calibration,
+        }
     )
     receipt = {
         "schema_version": 1,
@@ -453,6 +474,60 @@ def run_direct_mapping(
     }
     write_json(request.run_dir / "products/FINAL_RECEIPT.json", receipt)
     return receipt
+
+
+def run_localization_packaging_isolated(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Build MegaLoc assets in a fresh process before any GLUEMAP torch import."""
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "sfm_diagnosis.site_pipeline.localization_package_worker"],
+        input=json.dumps(dict(payload)),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "isolated localization packaging failed: "
+            + (completed.stderr.strip() or completed.stdout.strip())
+        )
+    try:
+        result = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("isolated localization packaging returned invalid JSON") from error
+    if result.get("status") != "completed":
+        raise RuntimeError(f"isolated localization packaging failed: {result}")
+    return dict(result)
+
+
+def _complete_model(path: Path) -> bool:
+    return all(
+        (path / name).is_file() and (path / name).stat().st_size > 0
+        for name in ("cameras.bin", "images.bin", "points3D.bin")
+    )
+
+
+def _recover_completed_mapping(model: Path, keyframes_path: Path) -> dict[str, Any]:
+    import pycolmap
+
+    from .pose_only import assert_pose_only_observation_free
+
+    reconstruction = pycolmap.Reconstruction(str(model.resolve(strict=True)))
+    pose_names = {
+        str(row["output_name"])
+        for row in _read_jsonl(keyframes_path)
+        if row.get("mapping_mode") == "POSE_ONLY"
+    }
+    return {
+        "status": "completed",
+        "outputs": [str(model)],
+        "pair_source": "native",
+        "cache_reuse": True,
+        "recovered_completed_model": True,
+        "registered_images": reconstruction.num_reg_images(),
+        "points3D": len(reconstruction.points3D),
+        "pose_only_check": assert_pose_only_observation_free(reconstruction, pose_names),
+    }
 
 
 def _sanitization_rows(result) -> list[dict[str, Any]]:
@@ -498,5 +573,6 @@ __all__ = [
     "export_original_rgb_ply",
     "localization_reference_rows",
     "prepare_direct_run",
+    "run_localization_packaging_isolated",
     "run_direct_mapping",
 ]

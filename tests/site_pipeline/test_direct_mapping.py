@@ -12,6 +12,7 @@ from sfm_diagnosis.site_pipeline.direct_mapping import (
     export_original_rgb_ply,
     localization_reference_rows,
     prepare_direct_run,
+    run_localization_packaging_isolated,
     run_direct_mapping,
 )
 
@@ -266,8 +267,8 @@ def test_run_direct_mapping_records_unvalidated_outputs(tmp_path: Path, monkeypa
         },
     )
     monkeypatch.setattr(
-        "sfm_diagnosis.site_pipeline.direct_mapping.build_localization_package",
-        lambda **_kwargs: {"references": 8, "descriptor_shape": [8, 8448]},
+        "sfm_diagnosis.site_pipeline.direct_mapping.run_localization_packaging_isolated",
+        lambda _payload: {"references": 8, "descriptor_shape": [8, 8448]},
     )
 
     receipt = run_direct_mapping(request, runtime, resume=False)
@@ -277,3 +278,31 @@ def test_run_direct_mapping_records_unvalidated_outputs(tmp_path: Path, monkeypa
     assert receipt["graph_checks"] == "SKIPPED_BY_REQUEST"
     assert receipt["mapping"]["pair_source"] == "native"
     assert receipt["rgb_ply"]["recolored_points"] == 0
+
+
+def test_localization_packaging_runs_in_a_fresh_python_process(monkeypatch) -> None:
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured.update(kwargs)
+        return type(
+            "Completed",
+            (),
+            {
+                "returncode": 0,
+                "stdout": json.dumps({"status": "completed", "references": 8}) + "\n",
+                "stderr": "",
+            },
+        )()
+
+    monkeypatch.setattr("sfm_diagnosis.site_pipeline.direct_mapping.subprocess.run", fake_run)
+
+    result = run_localization_packaging_isolated({"model_dir": "/map"})
+
+    assert captured["command"][1:3] == [
+        "-m",
+        "sfm_diagnosis.site_pipeline.localization_package_worker",
+    ]
+    assert captured["input"] == json.dumps({"model_dir": "/map"})
+    assert result["references"] == 8
