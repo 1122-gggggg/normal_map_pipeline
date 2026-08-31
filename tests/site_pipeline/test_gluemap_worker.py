@@ -21,6 +21,7 @@ from sfm_diagnosis.site_pipeline.gluemap_worker import (
     workspace_identity,
     write_scaled_intrinsics_seed,
     run_adapter_request,
+    select_direct_keyframes,
     validate_colmap_pair_database,
 )
 
@@ -238,3 +239,31 @@ def test_completed_refinement_requires_model_and_pair_database(tmp_path):
     assert find_completed_refined_model(workspace) == model
     (model / "points3D.bin").unlink()
     assert find_completed_refined_model(workspace) is None
+
+
+def test_direct_selection_uses_every_candidate_and_reads_pose_only_from_keyframes():
+    rows = [
+        {
+            "keyframe_id": "v1:1",
+            "output_name": "v1/0001.jpg",
+            "status": "CANDIDATE",
+            "mapping_mode": "TRIANGULATE",
+        },
+        {
+            "keyframe_id": "v1:2",
+            "output_name": "v1/0002.jpg",
+            "status": "CANDIDATE",
+            "mapping_mode": "POSE_ONLY",
+        },
+        {
+            "keyframe_id": "v1:3",
+            "output_name": "v1/0003.jpg",
+            "status": "INACTIVE_REJECT",
+            "mapping_mode": "TRIANGULATE",
+        },
+    ]
+
+    selected, pose_only = select_direct_keyframes(rows)
+
+    assert [row["keyframe_id"] for row in selected] == ["v1:1", "v1:2"]
+    assert pose_only == {"v1/0002.jpg"}

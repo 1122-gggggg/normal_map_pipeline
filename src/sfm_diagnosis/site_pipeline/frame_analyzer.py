@@ -53,6 +53,56 @@ def _basic_evidence(image: np.ndarray) -> dict[str, Any]:
     }
 
 
+def calibrated_rotation_evidence(
+    homography: np.ndarray,
+    points_i: np.ndarray,
+    points_j: np.ndarray,
+    intrinsics: np.ndarray,
+    *,
+    image_shape: tuple[int, int],
+) -> dict[str, Any]:
+    """Recover yaw/pitch/roll from ``K R K^-1`` and residual parallax."""
+
+    h = np.asarray(homography, dtype=np.float64)
+    k = np.asarray(intrinsics, dtype=np.float64)
+    first = np.asarray(points_i, dtype=np.float64).reshape(-1, 2)
+    second = np.asarray(points_j, dtype=np.float64).reshape(-1, 2)
+    empty = {
+        "rotation_degrees": None,
+        "rotation_residual_p50_px": None,
+        "pure_rotation_geometry": False,
+    }
+    if h.shape != (3, 3) or k.shape != (3, 3) or len(first) < 4 or len(first) != len(second):
+        return empty
+    if not np.isfinite(h).all() or not np.isfinite(k).all():
+        return empty
+    try:
+        inverse_k = np.linalg.inv(k)
+        u, _, vt = np.linalg.svd(inverse_k @ h @ k)
+    except np.linalg.LinAlgError:
+        return empty
+    handedness = 1.0 if np.linalg.det(u @ vt) >= 0 else -1.0
+    rotation = u @ np.diag([1.0, 1.0, handedness]) @ vt
+    cosine = float(np.clip((np.trace(rotation) - 1.0) / 2.0, -1.0, 1.0))
+    angle = float(np.degrees(np.arccos(cosine)))
+    rotation_h = k @ rotation @ inverse_k
+    homogeneous = np.column_stack((first, np.ones(len(first), dtype=np.float64)))
+    projected = (rotation_h @ homogeneous.T).T
+    valid = np.abs(projected[:, 2]) > 1e-12
+    if not np.any(valid):
+        return empty
+    predicted = projected[valid, :2] / projected[valid, 2:]
+    residual_p50 = float(np.median(np.linalg.norm(predicted - second[valid], axis=1)))
+    height, width = image_shape
+    pixel_scale = max(float(width) / 1280.0, float(height) / 720.0, 1.0)
+    return {
+        "rotation_degrees": angle,
+        "rotation_residual_p50_px": residual_p50,
+        "pure_rotation_geometry": bool(angle >= 0.35 and residual_p50 <= 0.75 * pixel_scale),
+        "relative_rotation_calibrated": rotation.tolist(),
+    }
+
+
 def analyze_frame_pair(
     image_i: np.ndarray,
     image_j: np.ndarray,
@@ -85,6 +135,9 @@ def analyze_frame_pair(
         "turn_event": False,
         "homography_dominant": False,
         "relative_rotation_2d_deg": None,
+        "rotation_degrees": None,
+        "rotation_residual_p50_px": None,
+        "pure_rotation_geometry": False,
         "dynamic_fraction": None,
         "warnings": [],
         "status": "CANDIDATE",
@@ -130,8 +183,29 @@ def analyze_frame_pair(
     if h is not None and np.isfinite(h).all():
         rotation_2d = float(np.degrees(np.arctan2(h[1, 0], h[0, 0])))
         result["relative_rotation_2d_deg"] = rotation_2d
+        if intrinsics is not None:
+            keep_h = (
+                mask_h.reshape(-1).astype(bool)
+                if mask_h is not None
+                else np.ones(len(p), dtype=bool)
+            )
+            result.update(
+                calibrated_rotation_evidence(
+                    h,
+                    p[keep_h],
+                    q[keep_h],
+                    np.asarray(intrinsics, dtype=np.float64),
+                    image_shape=first.shape,
+                )
+            )
+        calibrated_turn = bool(
+            result.get("pure_rotation_geometry") is True
+            and result.get("rotation_degrees") is not None
+            and float(result["rotation_degrees"]) >= 5.0
+        )
         result["turn_event"] = bool(
-            abs(rotation_2d) >= 5.0 and result["inliers_H"] >= max(12, 0.6 * len(p))
+            (calibrated_turn or abs(rotation_2d) >= 5.0)
+            and result["inliers_H"] >= max(12, 0.6 * len(p))
         )
     result["homography_dominant"] = bool(result["inliers_H"] >= 0.9 * max(result["inliers_F"], 1))
     if intrinsics is not None:
@@ -150,7 +224,9 @@ def analyze_frame_pair(
         result["motion_class"] = "unproven"
     elif result["near_duplicate"] or result["flow_median_px"] < 0.5:
         result["motion_class"] = "hover"
-    elif result["homography_dominant"] and result["turn_event"]:
+    elif result["homography_dominant"] and (
+        result.get("pure_rotation_geometry") is True or result["turn_event"]
+    ):
         result["motion_class"] = "pure_rotation"
     elif result["flow_median_px"] > 35.0:
         result["motion_class"] = "fast_motion"

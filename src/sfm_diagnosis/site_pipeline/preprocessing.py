@@ -44,6 +44,28 @@ class Segment:
     boundary_reasons: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class DirectSamplingPolicy:
+    probe_fps: float = 4.0
+    baseline_fps: float = 1.0
+    fast_fps: float = 2.0
+    hover_fps: float = 0.2
+    rotation_fps: float = 2.0
+    min_gap_seconds: float = 0.25
+
+
+@dataclass(frozen=True)
+class PlannedKeyframe:
+    frame: FrameRecord
+    mapping_mode: str
+
+
+@dataclass(frozen=True)
+class DirectKeyframePlan:
+    keyframes: tuple[PlannedKeyframe, ...]
+    forced_pairs: tuple[tuple[str, str], ...]
+
+
 def frame_id(frame: Mapping[str, Any]) -> str:
     return f"{frame['video_id']}:{int(frame['frame_index']):08d}"
 
@@ -225,6 +247,7 @@ def adaptive_keyframes(
     min_gap: float = 0.5,
     fast_fps: float = 2.0,
     static_fps: float = 0.5,
+    rotation_fps: float | None = None,
     motion_threshold: float = 2.0,
     novelty_threshold: float = 0.8,
 ) -> tuple[FrameRecord, ...]:
@@ -235,6 +258,7 @@ def adaptive_keyframes(
     baseline = min(2.0, max(0.5, baseline_fps))
     fast = min(2.0, max(baseline, fast_fps))
     static = min(baseline, max(0.05, static_fps))
+    rotation = fast if rotation_fps is None else min(fast, max(0.05, rotation_fps))
     records = _records(frames)
     if not records:
         return ()
@@ -250,12 +274,14 @@ def adaptive_keyframes(
         mandatory = bool(
             is_last
             or novelty >= novelty_threshold
-            or source.get("turn_event") is True
+            or (source.get("turn_event") is True and motion_class != "pure_rotation")
             or source.get("scene_cut") is True
             or source.get("segment_boundary") is True
         )
-        if (
-            motion_class in {"fast_motion", "pure_rotation"}
+        if motion_class == "pure_rotation":
+            rate = rotation
+        elif (
+            motion_class == "fast_motion"
             or (motion_class is None and motion >= motion_threshold)
             or novelty >= novelty_threshold
         ):
@@ -279,6 +305,39 @@ def adaptive_keyframes(
     return tuple(chosen)
 
 
+def plan_direct_keyframes(
+    frames: Iterable[FrameRecord | Mapping[str, Any]],
+    *,
+    policy: DirectSamplingPolicy | None = None,
+) -> DirectKeyframePlan:
+    """Plan all-in-one inputs for one video without graph/session selection."""
+
+    settings = policy or DirectSamplingPolicy()
+    selected = adaptive_keyframes(
+        frames,
+        baseline_fps=settings.baseline_fps,
+        fast_fps=settings.fast_fps,
+        static_fps=settings.hover_fps,
+        rotation_fps=settings.rotation_fps,
+        min_gap=settings.min_gap_seconds,
+    )
+    planned = tuple(
+        PlannedKeyframe(
+            frame=row,
+            mapping_mode=(
+                "POSE_ONLY" if row.source.get("motion_class") == "pure_rotation" else "TRIANGULATE"
+            ),
+        )
+        for row in selected
+    )
+    forced = tuple(
+        (left.frame.frame_id, right.frame.frame_id)
+        for left, right in zip(planned[:-1], planned[1:], strict=True)
+        if "POSE_ONLY" in {left.mapping_mode, right.mapping_mode}
+    )
+    return DirectKeyframePlan(planned, forced)
+
+
 def _records(frames: Iterable[FrameRecord | Mapping[str, Any]]) -> list[FrameRecord]:
     records: list[FrameRecord] = []
     for item in frames:
@@ -299,12 +358,16 @@ def _number(value: Any, default: float = 0.0) -> float:
 
 
 __all__ = [
+    "DirectKeyframePlan",
+    "DirectSamplingPolicy",
     "FrameRecord",
+    "PlannedKeyframe",
     "RemovedFrame",
     "SanitizationResult",
     "Segment",
     "adaptive_keyframes",
     "frame_id",
+    "plan_direct_keyframes",
     "sanitize_frames",
     "split_segments",
 ]

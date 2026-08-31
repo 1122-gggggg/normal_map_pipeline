@@ -1,5 +1,7 @@
 from sfm_diagnosis.site_pipeline.preprocessing import (
+    DirectSamplingPolicy,
     adaptive_keyframes,
+    plan_direct_keyframes,
     sanitize_frames,
     split_segments,
 )
@@ -136,3 +138,38 @@ def test_smoothing_leading_motion_spike_does_not_leave_a_false_entry_boundary():
 
     assert len(segments) == 1
     assert segments[0].boundary_reasons == ()
+
+
+def test_direct_plan_downsamples_hover_and_keeps_rotation_as_pose_only_bridge():
+    frames = [
+        frame(0, timestamp=0.0, motion_class="parallax"),
+        frame(1, timestamp=0.5, motion_class="hover"),
+        frame(2, timestamp=1.0, motion_class="hover"),
+        frame(3, timestamp=1.5, motion_class="hover"),
+        frame(4, timestamp=2.0, motion_class="pure_rotation", turn_event=True),
+        frame(5, timestamp=2.25, motion_class="pure_rotation", turn_event=True),
+        frame(6, timestamp=2.5, motion_class="pure_rotation", turn_event=True),
+        frame(7, timestamp=3.0, motion_class="parallax"),
+    ]
+    policy = DirectSamplingPolicy(
+        baseline_fps=1.0,
+        fast_fps=2.0,
+        hover_fps=0.2,
+        rotation_fps=2.0,
+        min_gap_seconds=0.0,
+    )
+
+    plan = plan_direct_keyframes(frames, policy=policy)
+
+    assert [item.frame.frame_index for item in plan.keyframes] == [0, 4, 6, 7]
+    assert [item.mapping_mode for item in plan.keyframes] == [
+        "TRIANGULATE",
+        "POSE_ONLY",
+        "POSE_ONLY",
+        "TRIANGULATE",
+    ]
+    assert plan.forced_pairs == (
+        ("V01:00000000", "V01:00000004"),
+        ("V01:00000004", "V01:00000006"),
+        ("V01:00000006", "V01:00000007"),
+    )

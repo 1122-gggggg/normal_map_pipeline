@@ -52,6 +52,25 @@ def admitted_pairs_from_jsonl(path: str | Path) -> set[Pair]:
     return result
 
 
+def select_direct_keyframes(
+    rows: Iterable[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], set[str]]:
+    """Select every non-rejected keyframe for direct all-sequence mapping."""
+
+    selected = [dict(row) for row in rows if row.get("status", "CANDIDATE") == "CANDIDATE"]
+    if not selected:
+        raise ValueError("direct mapping contains no candidate keyframes")
+    names = [str(row.get("output_name") or "") for row in selected]
+    if any(not name for name in names) or len(names) != len(set(names)):
+        raise ValueError("direct keyframe output names must be non-empty and unique")
+    pose_only = {
+        str(row["output_name"])
+        for row in selected
+        if row.get("mapping_mode") == "POSE_ONLY"
+    }
+    return selected, pose_only
+
+
 def _names(dataset: Any) -> list[str]:
     names = getattr(dataset, "images_list", None)
     if names is None:
