@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import json
 import re
+import gc
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
-from sfm_diagnosis.io import write_json
+from sfm_diagnosis.io import load_gluemap, write_json
+from sfm_diagnosis.risk_ply import write_binary_ply
 
 from .config import PipelineConfig
 from .frame_analyzer import analyze_frames, extract_frames
 from .intrinsics import calibration_matrix_for_resolution
 from .inventory import discover_corpus, sha256_file
 from .preprocessing import DirectSamplingPolicy, plan_direct_keyframes, sanitize_frames
+from .gluemap_worker import run_adapter_request as run_gluemap_adapter
 
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
@@ -38,6 +41,39 @@ class DirectMappingRequest:
             raise FileNotFoundError(self.intrinsics_path)
         if self.run_dir == self.corpus_root or self.corpus_root in self.run_dir.parents:
             raise ValueError("direct mapping run must not be created inside the source corpus")
+
+
+@dataclass(frozen=True)
+class DirectMappingRuntime:
+    gluemap_root: Path
+    base_config_path: Path
+    workspace_root: Path
+    megaloc_source: Path
+    megaloc_checkpoint: Path
+    edm_root: Path | None = None
+    edm_checkpoint: Path | None = None
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "gluemap_root",
+            "base_config_path",
+            "workspace_root",
+            "megaloc_source",
+            "megaloc_checkpoint",
+            "edm_root",
+            "edm_checkpoint",
+        ):
+            value = getattr(self, field_name)
+            if value is not None:
+                object.__setattr__(self, field_name, Path(value).expanduser().resolve())
+        required = (
+            self.gluemap_root / "gluemap",
+            self.base_config_path,
+            self.megaloc_source,
+            self.megaloc_checkpoint,
+        )
+        if any(not path.exists() for path in required):
+            raise FileNotFoundError(next(path for path in required if not path.exists()))
 
 
 def prepare_direct_run(request: DirectMappingRequest, *, resume: bool = False) -> dict[str, Any]:
@@ -198,6 +234,227 @@ def prepare_direct_run(request: DirectMappingRequest, *, resume: bool = False) -
     return receipt
 
 
+def export_original_rgb_ply(model_dir: str | Path, output_path: str | Path) -> dict[str, Any]:
+    """Export exact COLMAP point colors without display or risk recoloring."""
+
+    map_data = load_gluemap(model_dir)
+    output = write_binary_ply(
+        output_path,
+        map_data.points_xyz,
+        map_data.point_rgb,
+        comments=("original COLMAP point RGB; no recoloring or downsampling",),
+    )
+    return {
+        "schema_version": 1,
+        "artifact_type": "ORIGINAL_RGB_PLY_RECEIPT",
+        "path": str(output),
+        "vertices": int(len(map_data.points_xyz)),
+        "recolored_points": 0,
+        "sha256": sha256_file(output),
+    }
+
+
+def localization_reference_rows(
+    reconstruction: Any,
+    keyframes: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return registered triangulating images that can lift EDM matches to 3D."""
+
+    rows: list[dict[str, Any]] = []
+    for image in sorted(reconstruction.images.values(), key=lambda value: str(value.name)):
+        name = str(image.name)
+        keyframe = keyframes.get(name)
+        if keyframe is None:
+            raise RuntimeError(f"registered image is absent from keyframes: {name}")
+        observations = sum(bool(point.has_point3D()) for point in image.points2D)
+        if keyframe.get("mapping_mode") == "POSE_ONLY" or observations == 0:
+            continue
+        rows.append(
+            {
+                "image_name": name,
+                "image_path": str(keyframe["image_uri"]),
+                "video_id": str(keyframe["video_id"]),
+                "observations": observations,
+            }
+        )
+    return rows
+
+
+def build_localization_package(
+    *,
+    model_dir: str | Path,
+    keyframes_path: str | Path,
+    output_dir: str | Path,
+    runtime: DirectMappingRuntime,
+    intrinsics: Mapping[str, Any],
+    descriptor_batch_size: int = 8,
+) -> dict[str, Any]:
+    """Build the frozen MegaLoc reference bank consumed by EDM+PnP queries."""
+
+    import pycolmap
+    from river_map_quality.megaloc_edm_catalog import (
+        extract_megaloc_descriptors,
+        load_offline_megaloc_runtime,
+    )
+
+    keyframes = {
+        str(row["output_name"]): row
+        for row in _read_jsonl(Path(keyframes_path))
+    }
+    reconstruction = pycolmap.Reconstruction(str(Path(model_dir).resolve(strict=True)))
+    references = localization_reference_rows(reconstruction, keyframes)
+    if not references:
+        raise RuntimeError("direct map contains no references with 3D observations")
+    output = Path(output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    manifest_path = output / "reference_manifest.jsonl"
+    _write_jsonl(manifest_path, references)
+    image_paths = [Path(str(row["image_path"])).resolve(strict=True) for row in references]
+    megaloc_runtime = load_offline_megaloc_runtime(
+        source=runtime.megaloc_source,
+        checkpoint=runtime.megaloc_checkpoint,
+        device="cuda",
+    )
+    descriptors = extract_megaloc_descriptors(
+        megaloc_runtime,
+        image_paths,
+        batch_size=descriptor_batch_size,
+    )
+    del megaloc_runtime
+    gc.collect()
+    try:
+        import torch
+
+        torch.cuda.empty_cache()
+    except ImportError:  # pragma: no cover - runtime dependent
+        pass
+    import numpy as np
+
+    descriptor_array = np.ascontiguousarray(descriptors, dtype=np.float32)
+    if descriptor_array.ndim != 2 or descriptor_array.shape[0] != len(references):
+        raise RuntimeError("MegaLoc descriptor rows disagree with reference identities")
+    descriptor_path = output / "megaloc_references.npy"
+    np.save(descriptor_path, descriptor_array, allow_pickle=False)
+    names_path = output / "megaloc_references.names.json"
+    names_path.write_text(
+        json.dumps([row["image_name"] for row in references], indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    config_path = output / "localizer_config.json"
+    write_json(
+        config_path,
+        {
+            "schema_version": 1,
+            "artifact_type": "DIRECT_MEGALOC_EDM_PNP_CONFIG",
+            "map_model": str(Path(model_dir).resolve()),
+            "reference_manifest": str(manifest_path),
+            "megaloc_source": str(runtime.megaloc_source),
+            "megaloc_checkpoint": str(runtime.megaloc_checkpoint),
+            "edm_root": None if runtime.edm_root is None else str(runtime.edm_root),
+            "edm_checkpoint": (
+                None if runtime.edm_checkpoint is None else str(runtime.edm_checkpoint)
+            ),
+            "intrinsics": dict(intrinsics),
+            "top_k": 5,
+            "lift_distance_px": 2.0,
+            "pose_solver": "COLMAP_PNP_RANSAC",
+            "validation": "NONE",
+        },
+    )
+    return {
+        "references": len(references),
+        "descriptor_shape": list(descriptor_array.shape),
+        "reference_manifest": str(manifest_path),
+        "descriptors": str(descriptor_path),
+        "descriptor_sha256": sha256_file(descriptor_path),
+        "config": str(config_path),
+    }
+
+
+def run_direct_mapping(
+    request: DirectMappingRequest,
+    runtime: DirectMappingRuntime,
+    *,
+    resume: bool = False,
+    preprocess_only: bool = False,
+) -> dict[str, Any]:
+    """Run preprocessing, one native multi-sequence GLUEMAP job, and packaging."""
+
+    preprocessing = prepare_direct_run(request, resume=resume)
+    if preprocess_only:
+        return preprocessing
+    calibration = json.loads(request.intrinsics_path.read_text(encoding="utf-8"))
+    config = json.loads(runtime.base_config_path.read_text(encoding="utf-8"))
+    config.update(
+        {
+            "coarse_only": False,
+            "extra_pairs_path": str(request.run_dir / "inputs/forced_pairs.txt"),
+            "is_multi_sequence": True,
+            "is_sequential": True,
+            "sample_frequency": 1,
+            "skip_doppelgangers": False,
+            "subfolder_regex": ".*",
+        }
+    )
+    gluemap_config = request.run_dir / "inputs/gluemap_config.json"
+    gluemap_config.write_text(
+        json.dumps(config, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    output_model = request.run_dir / "artifacts/mapping/direct/model"
+    mapping = run_gluemap_adapter(
+        {
+            "config": {
+                "gluemap_root": str(runtime.gluemap_root),
+                "config_file": str(gluemap_config),
+                "mode": "final",
+                "evidence_level": "refined_geometry",
+                "pair_source": "native",
+                "reuse_inference_cache": bool(resume),
+                "workspace_root": str(runtime.workspace_root),
+                "skip_doppelgangers": False,
+                "sift_device": "cpu",
+                "intrinsics_calibration": calibration,
+            },
+            "payload": {
+                "mode": "final",
+                "keyframes": str(
+                    request.run_dir / "artifacts/keyframes/keyframes.jsonl"
+                ),
+                "output_model": str(output_model),
+                "run_root": str(request.run_dir),
+                "corpus_manifest": str(request.run_dir / "inputs/corpus_manifest.json"),
+            },
+        }
+    )
+    products = request.run_dir / "products"
+    rgb_ply = export_original_rgb_ply(
+        output_model,
+        products / "map/original_rgb.ply",
+    )
+    write_json(products / "map/original_rgb_receipt.json", rgb_ply)
+    localization = build_localization_package(
+        model_dir=output_model,
+        keyframes_path=request.run_dir / "artifacts/keyframes/keyframes.jsonl",
+        output_dir=products / "localization",
+        runtime=runtime,
+        intrinsics=calibration,
+    )
+    receipt = {
+        "schema_version": 1,
+        "artifact_type": "DIRECT_MAPPING_FINAL_RECEIPT",
+        "status": "MAP_BUILT_UNVALIDATED_ALL_INPUTS",
+        "validation": "NONE",
+        "graph_checks": "SKIPPED_BY_REQUEST",
+        "preprocessing": preprocessing,
+        "mapping": mapping,
+        "rgb_ply": rgb_ply,
+        "localization": localization,
+    }
+    write_json(request.run_dir / "products/FINAL_RECEIPT.json", receipt)
+    return receipt
+
+
 def _sanitization_rows(result) -> list[dict[str, Any]]:
     return [
         {
@@ -226,4 +483,20 @@ def _write_jsonl(path: Path, rows: list[Mapping[str, Any]]) -> None:
     )
 
 
-__all__ = ["DirectMappingRequest", "prepare_direct_run"]
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+__all__ = [
+    "DirectMappingRequest",
+    "DirectMappingRuntime",
+    "build_localization_package",
+    "export_original_rgb_ply",
+    "localization_reference_rows",
+    "prepare_direct_run",
+    "run_direct_mapping",
+]

@@ -139,13 +139,74 @@ def build_parser() -> argparse.ArgumentParser:
     mvroma.add_argument("--weak-keyframe", action="append", default=[])
     mvroma.add_argument("--dry-run", action="store_true")
     mvroma.add_argument("--resume", action="store_true")
+
+    direct = commands.add_parser(
+        "direct-map",
+        help="Map every adaptively sampled sequence in one native GLUEMAP job",
+    )
+    direct.add_argument("--site-name", required=True)
+    direct.add_argument("--corpus", type=Path, required=True)
+    direct.add_argument("--run", type=Path, required=True)
+    direct.add_argument("--intrinsics", type=Path, required=True)
+    direct.add_argument("--gluemap-root", type=Path, required=True)
+    direct.add_argument("--gluemap-config", type=Path, required=True)
+    direct.add_argument("--workspace-root", type=Path, required=True)
+    direct.add_argument("--megaloc-source", type=Path, required=True)
+    direct.add_argument("--megaloc-checkpoint", type=Path, required=True)
+    direct.add_argument("--edm-root", type=Path)
+    direct.add_argument("--edm-checkpoint", type=Path)
+    direct.add_argument("--probe-fps", type=float, default=4.0)
+    direct.add_argument("--baseline-fps", type=float, default=1.0)
+    direct.add_argument("--fast-fps", type=float, default=2.0)
+    direct.add_argument("--hover-fps", type=float, default=0.2)
+    direct.add_argument("--rotation-fps", type=float, default=2.0)
+    direct.add_argument("--min-gap-seconds", type=float, default=0.25)
+    direct.add_argument("--preprocess-only", action="store_true")
+    direct.add_argument("--resume", action="store_true")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        if args.command == "init":
+        if args.command == "direct-map":
+            from .direct_mapping import (
+                DirectMappingRequest,
+                DirectMappingRuntime,
+                run_direct_mapping,
+            )
+            from .preprocessing import DirectSamplingPolicy
+
+            request = DirectMappingRequest(
+                site_name=args.site_name,
+                corpus_root=args.corpus,
+                run_dir=args.run,
+                intrinsics_path=args.intrinsics,
+                policy=DirectSamplingPolicy(
+                    probe_fps=args.probe_fps,
+                    baseline_fps=args.baseline_fps,
+                    fast_fps=args.fast_fps,
+                    hover_fps=args.hover_fps,
+                    rotation_fps=args.rotation_fps,
+                    min_gap_seconds=args.min_gap_seconds,
+                ),
+            )
+            runtime = DirectMappingRuntime(
+                gluemap_root=args.gluemap_root,
+                base_config_path=args.gluemap_config,
+                workspace_root=args.workspace_root,
+                megaloc_source=args.megaloc_source,
+                megaloc_checkpoint=args.megaloc_checkpoint,
+                edm_root=args.edm_root,
+                edm_checkpoint=args.edm_checkpoint,
+            )
+            payload = run_direct_mapping(
+                request,
+                runtime,
+                resume=args.resume,
+                preprocess_only=args.preprocess_only,
+            )
+        elif args.command == "init":
             pipeline = SitePipeline(PipelineConfig.from_toml(args.config))
             result = pipeline.initialize(
                 args.corpus,

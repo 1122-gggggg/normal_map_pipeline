@@ -149,3 +149,33 @@ def test_cli_has_init_run_status_approve_export_and_backfill_commands() -> None:
     )
     assert mvroma.command == "mvroma-augment"
     assert mvroma.scope == "targeted"
+
+    direct = parser.parse_args(
+        [
+            "direct-map",
+            "--site-name",
+            "river-all8",
+            "--corpus",
+            "mapping",
+            "--run",
+            "run",
+            "--intrinsics",
+            "intrinsics.json",
+            "--gluemap-root",
+            "gluemap",
+            "--gluemap-config",
+            "gluemap.json",
+            "--workspace-root",
+            "workspace",
+            "--megaloc-source",
+            "megaloc/source",
+            "--megaloc-checkpoint",
+            "megaloc/model.safetensors",
+            "--hover-fps",
+            "0.2",
+            "--resume",
+        ]
+    )
+    assert direct.command == "direct-map"
+    assert direct.hover_fps == 0.2
+    assert direct.resume is True
