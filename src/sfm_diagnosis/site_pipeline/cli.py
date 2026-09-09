@@ -12,9 +12,55 @@ from .pipeline import ApprovalRequired, SitePipeline
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="site-sfm-pipeline",
-        description="Graph-aware, segment-centric multi-video SfM pipeline.",
+        description="Adopted all-sequence GlueMap + EDM retriangulation mapping and two-rate localization.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
+
+    mapped = commands.add_parser(
+        "map",
+        help="Adopted mapping: all-sequence GlueMap poses, then official EDM retriangulation",
+    )
+    mapped.add_argument("--site-name", required=True)
+    mapped.add_argument("--corpus", type=Path, required=True)
+    mapped.add_argument("--run", type=Path, required=True)
+    mapped.add_argument("--intrinsics", type=Path, required=True)
+    mapped.add_argument("--gluemap-root", type=Path, required=True)
+    mapped.add_argument("--gluemap-config", type=Path, required=True)
+    mapped.add_argument("--workspace-root", type=Path, required=True)
+    mapped.add_argument("--megaloc-source", type=Path, required=True)
+    mapped.add_argument("--megaloc-checkpoint", type=Path, required=True)
+    mapped.add_argument("--edm-root", type=Path, required=True)
+    mapped.add_argument("--edm-checkpoint", type=Path, required=True)
+    mapped.add_argument("--edm-model-config", type=Path)
+    mapped.add_argument("--edm-data-config", type=Path)
+    mapped.add_argument("--probe-fps", type=float, default=4.0)
+    mapped.add_argument("--baseline-fps", type=float, default=1.0)
+    mapped.add_argument("--fast-fps", type=float, default=2.0)
+    mapped.add_argument("--hover-fps", type=float, default=0.2)
+    mapped.add_argument("--rotation-fps", type=float, default=2.0)
+    mapped.add_argument("--min-gap-seconds", type=float, default=0.25)
+    mapped.add_argument("--preprocess-only", action="store_true")
+    mapped.add_argument("--resume", action="store_true")
+
+    localize = commands.add_parser(
+        "localize",
+        help="Adopted two-rate localization: KLT+PnP fast loop and MegaLoc+EDM reloc",
+    )
+    localize.add_argument("--map-model", type=Path, required=True)
+    localize.add_argument("--keyframes", type=Path, required=True)
+    localize.add_argument("--frames", type=Path, required=True)
+    localize.add_argument("--output", type=Path, required=True)
+    localize.add_argument("--localizer-config", type=Path, required=True)
+    localize.add_argument("--localization-dir", type=Path, required=True)
+    localize.add_argument("--edm-root", type=Path, required=True)
+    localize.add_argument("--edm-checkpoint", type=Path, required=True)
+    localize.add_argument("--edm-model-config", type=Path)
+    localize.add_argument("--edm-data-config", type=Path)
+    localize.add_argument("--reference-depth-dir", type=Path)
+    localize.add_argument("--excluded-session")
+    localize.add_argument("--gt-video-id")
+    localize.add_argument("--route", default="stream")
+    localize.add_argument("--resume", action="store_true")
 
     initialize = commands.add_parser("init", help="Create immutable corpus inventory")
     initialize.add_argument("--config", type=Path, required=True)
@@ -169,7 +215,65 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        if args.command == "direct-map":
+        if args.command == "map":
+            from .adopted_pipeline import run_adopted_mapping
+            from .direct_mapping import DirectMappingRequest, DirectMappingRuntime
+            from .preprocessing import DirectSamplingPolicy
+
+            request = DirectMappingRequest(
+                site_name=args.site_name,
+                corpus_root=args.corpus,
+                run_dir=args.run,
+                intrinsics_path=args.intrinsics,
+                policy=DirectSamplingPolicy(
+                    probe_fps=args.probe_fps,
+                    baseline_fps=args.baseline_fps,
+                    fast_fps=args.fast_fps,
+                    hover_fps=args.hover_fps,
+                    rotation_fps=args.rotation_fps,
+                    min_gap_seconds=args.min_gap_seconds,
+                ),
+            )
+            runtime = DirectMappingRuntime(
+                gluemap_root=args.gluemap_root,
+                base_config_path=args.gluemap_config,
+                workspace_root=args.workspace_root,
+                megaloc_source=args.megaloc_source,
+                megaloc_checkpoint=args.megaloc_checkpoint,
+                edm_root=args.edm_root,
+                edm_checkpoint=args.edm_checkpoint,
+            )
+            payload = run_adopted_mapping(
+                request,
+                runtime,
+                resume=args.resume,
+                preprocess_only=args.preprocess_only,
+                edm_model_config=args.edm_model_config,
+                edm_data_config=args.edm_data_config,
+            )
+        elif args.command == "localize":
+            from .adopted_pipeline import DEFAULT_EDM_DATA_CONFIG, DEFAULT_EDM_MODEL_CONFIG
+            from .deploy_loop import DeployConfig, run_deploy_loop
+
+            payload = run_deploy_loop(
+                DeployConfig(
+                    map_model=args.map_model,
+                    keyframes=args.keyframes,
+                    frames_dir=args.frames,
+                    output_dir=args.output,
+                    localizer_config=args.localizer_config,
+                    localization_dir=args.localization_dir,
+                    edm_repo=args.edm_root,
+                    edm_checkpoint=args.edm_checkpoint,
+                    edm_model_config=args.edm_model_config or DEFAULT_EDM_MODEL_CONFIG,
+                    edm_data_config=args.edm_data_config or DEFAULT_EDM_DATA_CONFIG,
+                    reference_depth_dir=args.reference_depth_dir,
+                    excluded_session=args.excluded_session,
+                    gt_video_id=args.gt_video_id,
+                    route=args.route,
+                )
+            )
+        elif args.command == "direct-map":
             from .direct_mapping import (
                 DirectMappingRequest,
                 DirectMappingRuntime,

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "normal-map-pipeline"
 version = "0.1.0"
-description = "Graph-aware multi-video SfM, robust map release, and localization diagnosis"
+description = "All-sequence GlueMap + EDM retriangulation mapping and two-rate localization"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}

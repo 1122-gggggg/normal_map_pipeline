@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from enum import Enum
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -62,6 +62,18 @@ class EDMQueryResult:
     estimated_pitch_deg: float | None = None
     ground_truth_source: str | None = None
     loo_mode: str | None = None
+    occupancy_4x4: int | None = None
+    convex_hull_coverage: float | None = None
+    occupied_frac_30: float | None = None
+    viewpoint_pool_fallback: bool = False
+    query_status: str | None = None
+    in_intersection: bool = False
+    viewpoint_abstain: bool = False
+    n_track_2d3d: int | None = None
+    n_depth_2d3d: int | None = None
+    track_inliers: int | None = None
+    inlier_query_xy: tuple[tuple[float, float], ...] | None = None
+    inlier_confidence_mean: float | None = None
 
     def to_dict(self) -> dict:
         payload = asdict(self)
@@ -80,7 +92,8 @@ class EDMQueryResult:
         data["estimated_R_wc"] = (
             None if rotation is None else tuple(tuple(row) for row in rotation)
         )
-        return cls(**data)
+        allowed = {item.name for item in fields(cls)}
+        return cls(**{key: data[key] for key in data if key in allowed})
 
 
 class EDMProvider(Protocol):
