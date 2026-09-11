@@ -36,6 +36,7 @@ def run_adopted_mapping(
     preprocess_only: bool = False,
     edm_model_config: Path | None = None,
     edm_data_config: Path | None = None,
+    cell_px: float = CELL_PX,
 ) -> dict[str, Any]:
     """Build the adopted map: GlueMap poses + EDM observations + MegaLoc bank."""
 
@@ -77,7 +78,7 @@ def run_adopted_mapping(
             work_dir=work_dir,
             output_model=output_model,
             matcher=matcher,
-            cell_px=CELL_PX,
+            cell_px=cell_px,
             keypoint_cap=KEYPOINT_CAP,
             resume=resume,
         )
@@ -106,7 +107,7 @@ def run_adopted_mapping(
         "pipeline": "gluemap_poses_edm_observations",
         "status": "MAP_BUILT_UNVALIDATED_ALL_INPUTS",
         "validation": "NONE",
-        "cell_px": CELL_PX,
+        "cell_px": cell_px,
         "lift_distance_px": LIFT_DISTANCE_PX,
         "gluemap": glue,
         "edm_retriangulation": retriangulation,

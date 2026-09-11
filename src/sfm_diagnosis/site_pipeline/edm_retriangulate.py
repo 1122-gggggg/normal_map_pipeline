@@ -372,7 +372,8 @@ def match_pairs(
 ) -> int:
     match_dir.mkdir(parents=True, exist_ok=True)
     wrote = 0
-    for row in pairs:
+    total = len(pairs)
+    for index, row in enumerate(pairs, start=1):
         name_a = str(row["name_a"])
         name_b = str(row["name_b"])
         path = _npz_path(match_dir, name_a, name_b)
@@ -381,6 +382,8 @@ def match_pairs(
         mkpts0, mkpts1, mconf = matcher(image_root / name_a, image_root / name_b)
         np.savez_compressed(path, mkpts0=mkpts0, mkpts1=mkpts1, mconf=mconf)
         wrote += 1
+        if index % 200 == 0 or index == total:
+            print(f"edm match {index}/{total} wrote={wrote}", flush=True)
     return wrote
 
 
@@ -627,9 +630,12 @@ def official_edm_matcher(
     data_config: Path,
     device: str = "cuda",
 ) -> Matcher:
+    from river_map_quality.official_edm_adapter_loo import prepare_official_megadepth_image
+
     from .deployment_localizer import (
         _configure_audited_runtime_site_packages,
         _match_official_prepared,
+        _prepare_official_image,
         _resolve_audited_site_packages,
         _valid_matches,
     )
@@ -645,22 +651,40 @@ def official_edm_matcher(
         device=device,
     )
     prepared: dict[Path, Any] = {}
+    shapes: dict[Path, tuple[int, int]] = {}
 
     def _prepare(path: Path):
+        import cv2
+
         resolved = path.resolve()
         cached = prepared.get(resolved)
         if cached is not None:
             return cached
-        image = runtime.prepare_image(resolved)
+        gray = cv2.imread(str(resolved), cv2.IMREAD_GRAYSCALE)
+        if gray is None:
+            raise FileNotFoundError(resolved)
+        image = _prepare_official_image(
+            resolved, runtime, prepare_image=prepare_official_megadepth_image, image=gray
+        )
         prepared[resolved] = image
+        shapes[resolved] = gray.shape
         return image
 
     def match(path_a: Path, path_b: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        payload = _match_official_prepared(runtime, _prepare(path_a), _prepare(path_b))
-        mkpts0 = np.asarray(payload["mkpts0"], dtype=np.float64)
-        mkpts1 = np.asarray(payload["mkpts1"], dtype=np.float64)
+        resolved_a = path_a.resolve()
+        resolved_b = path_b.resolve()
+        payload = _match_official_prepared(runtime, _prepare(resolved_a), _prepare(resolved_b))
+        mkpts0 = np.asarray(payload.get("mkpts0_f", payload.get("mkpts0")), dtype=np.float64)
+        mkpts1 = np.asarray(payload.get("mkpts1_f", payload.get("mkpts1")), dtype=np.float64)
         mconf = np.asarray(payload["mconf"], dtype=np.float64)
-        valid = _valid_matches(mkpts0, mkpts1, mconf)
+        valid = _valid_matches(
+            mkpts0,
+            mkpts1,
+            mconf,
+            query_shape=shapes[resolved_a],
+            reference_shape=shapes[resolved_b],
+            confidence_threshold=0.0,
+        )
         return mkpts0[valid], mkpts1[valid], mconf[valid]
 
     match.runtime = runtime  # type: ignore[attr-defined]

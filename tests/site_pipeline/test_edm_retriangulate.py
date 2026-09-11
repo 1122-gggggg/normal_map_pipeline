@@ -16,6 +16,11 @@ def test_quantize_xy_shares_a_two_pixel_cell() -> None:
     assert quantize_xy((0.05, 0.05), cell=2.0) != quantize_xy((2.15, 0.05), cell=2.0)
 
 
+def test_quantize_xy_one_pixel_cell_keeps_neighbors_apart() -> None:
+    assert quantize_xy((0.05, 0.05), cell=1.0) != quantize_xy((1.05, 0.05), cell=1.0)
+    assert quantize_xy((0.05, 0.05), cell=2.0) == quantize_xy((1.05, 0.05), cell=2.0)
+
+
 def test_accumulate_cell_keypoints_keeps_highest_confidence() -> None:
     pairs = [
         (
@@ -98,6 +103,7 @@ def test_cli_exposes_adopted_map_and_localize() -> None:
         ]
     )
     assert mapped.command == "map"
+    assert mapped.cell_px == 2.0
     localize = parser.parse_args(
         [
             "localize",

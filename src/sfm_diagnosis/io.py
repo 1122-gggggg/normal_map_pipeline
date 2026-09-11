@@ -187,4 +187,9 @@ def _json_default(value: object):
         return value.item()
     if isinstance(value, Path):
         return str(value)
+    if isinstance(value, (set, frozenset)):
+        try:
+            return sorted(value)
+        except TypeError:
+            return list(value)
     raise TypeError(type(value).__name__)

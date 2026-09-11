@@ -1,9 +1,12 @@
+from pathlib import Path
+
 import json
 import sqlite3
 
 import pytest
 
 from sfm_diagnosis.site_pipeline.gluemap_worker import (
+    resolve_stage_resume,
     admitted_pairs_from_jsonl,
     admitted_pair_ids_from_database,
     assert_run_controlled_path,
@@ -305,3 +308,113 @@ def test_native_mapping_inputs_do_not_require_selection_geometry_or_roles(tmp_pa
     assert inputs.selected_ids == frozenset({"v1:1", "v1:2"})
     assert inputs.pose_names == frozenset({"v1/0002.jpg"})
     assert inputs.admitted_names is None
+
+
+class _FakeTorch:
+    """Minimal torch stand-in: `load` succeeds unless the path is poisoned."""
+
+    def __init__(self, bad_names=()):
+        self.bad_names = set(bad_names)
+        self.loaded = []
+
+    def load(self, path, **kwargs):
+        self.loaded.append(str(path))
+        if Path(path).name in self.bad_names:
+            raise EOFError(f"truncated cache: {path}")
+        return {"probe": True}
+
+
+def _install_fake_torch(monkeypatch, bad_names=()):
+    import sys
+
+    fake = _FakeTorch(bad_names)
+    monkeypatch.setitem(sys.modules, "torch", fake)
+    return fake
+
+
+def _seed_sift_db(path):
+    connection = sqlite3.connect(path)
+    connection.execute("CREATE TABLE images (image_id INTEGER PRIMARY KEY, name TEXT)")
+    connection.execute("INSERT INTO images VALUES (1, 'a.jpg')")
+    connection.commit()
+    connection.close()
+
+
+def _seed_stage_files(root, *, derived=True):
+    (root / "twoview_result.pth").write_bytes(b"twoview-cache")
+    (root / "star_result.pth").write_bytes(b"star-cache")
+    _seed_sift_db(root / "database_sift.db")
+    if derived:
+        (root / "coarse").mkdir()
+        (root / "gluemap_aba").mkdir()
+
+
+def test_stage_resume_without_torch_recomputes_without_deleting_unvalidated(tmp_path, monkeypatch):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "torch", None)
+    root = tmp_path / "gluemap"
+    root.mkdir()
+    _seed_stage_files(root)
+    resume = resolve_stage_resume(root)
+    assert (resume.force_load, resume.rerun_from) == (True, "twoview")
+    assert resume.cache["twoview"] == "unvalidated-no-torch"
+    # The unverifiable twoview file itself is left alone; only the star
+    # derived from it is cascade-dropped (the runner would rebuild both).
+    assert (root / "twoview_result.pth").is_file()
+    assert resume.cache["star"] == "stale-dropped"
+    assert not (root / "star_result.pth").exists()
+
+
+@pytest.mark.parametrize("mode", ["diagnostic", "final"])
+def test_stage_resume_fresh_matches_default_profile(tmp_path, mode):
+    profile = prepare_gluemap_config(mode)
+    resume = resolve_stage_resume(tmp_path / "gluemap")
+    assert resume.force_load == profile["force_load"]
+    assert resume.rerun_from == profile["rerun_from"]
+
+
+def test_stage_resume_full_resume_keeps_derived_artifacts(tmp_path, monkeypatch):
+    _install_fake_torch(monkeypatch)
+    root = tmp_path / "gluemap"
+    root.mkdir()
+    (root / "salad_descriptors.pt").write_bytes(b"descriptors")
+    _seed_stage_files(root)
+    resume = resolve_stage_resume(root)
+    assert (resume.force_load, resume.rerun_from) == (True, None)
+    assert resume.cache["twoview"] == "validated"
+    assert resume.cache["star"] == "validated"
+    assert resume.cache["retrieval"] == "present"
+    assert resume.cache["sift_database"] == "present"
+    assert resume.dropped == ()
+    assert (root / "database_sift.db").is_file()
+    assert (root / "coarse").is_dir()
+
+
+def test_stage_resume_corrupt_star_recomputes_star_only(tmp_path, monkeypatch):
+    _install_fake_torch(monkeypatch, bad_names={"star_result.pth"})
+    root = tmp_path / "gluemap"
+    root.mkdir()
+    _seed_stage_files(root)
+    resume = resolve_stage_resume(root)
+    assert (resume.force_load, resume.rerun_from) == (True, "star")
+    assert resume.cache["twoview"] == "validated"
+    assert resume.cache["star"] == "corrupt-dropped"
+    assert not (root / "star_result.pth").exists()
+    assert not (root / "database_sift.db").exists()
+    assert not (root / "coarse").exists()
+    assert set(resume.dropped) >= {"database_sift.db", "coarse", "gluemap_aba"}
+
+
+def test_stage_resume_corrupt_twoview_cascades_to_star(tmp_path, monkeypatch):
+    _install_fake_torch(monkeypatch, bad_names={"twoview_result.pth"})
+    root = tmp_path / "gluemap"
+    root.mkdir()
+    _seed_stage_files(root)
+    resume = resolve_stage_resume(root)
+    assert (resume.force_load, resume.rerun_from) == (True, "twoview")
+    assert resume.cache["twoview"] == "corrupt-dropped"
+    assert resume.cache["star"] == "stale-dropped"
+    assert not (root / "twoview_result.pth").exists()
+    assert not (root / "star_result.pth").exists()
+    assert not (root / "gluemap_aba").exists()

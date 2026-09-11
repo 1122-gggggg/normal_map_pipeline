@@ -41,6 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     mapped.add_argument("--min-gap-seconds", type=float, default=0.25)
     mapped.add_argument("--preprocess-only", action="store_true")
     mapped.add_argument("--resume", action="store_true")
+    mapped.add_argument("--cell-px", type=float, default=2.0)
 
     localize = commands.add_parser(
         "localize",
@@ -250,6 +251,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 preprocess_only=args.preprocess_only,
                 edm_model_config=args.edm_model_config,
                 edm_data_config=args.edm_data_config,
+                cell_px=args.cell_px,
             )
         elif args.command == "localize":
             from .adopted_pipeline import DEFAULT_EDM_DATA_CONFIG, DEFAULT_EDM_MODEL_CONFIG

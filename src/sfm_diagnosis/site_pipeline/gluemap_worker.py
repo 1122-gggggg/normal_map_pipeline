@@ -13,11 +13,12 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sqlite3
 import sys
 from argparse import Namespace
 from contextlib import nullcontext, redirect_stdout
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
@@ -265,6 +266,164 @@ def prepare_gluemap_config(
     }
 
 
+# Stage markers relative to the GLUEMAP write dir (``<workspace>/gluemap``).
+# Mirrors the pinned runner: twoview/star caches (`base_inference.run`),
+# SALAD descriptors (`image_retrieval`), and the SIFT database
+# (`gluemap_impl`, skipped when `force_load` finds it).
+_TWOVIEW_CACHE = "twoview_result.pth"
+_STAR_CACHE = "star_result.pth"
+_SIFT_DATABASE = "database_sift.db"
+# Artifacts derived from star predictions. Dropped when an upstream stage is
+# recomputed so refinement never consumes a stale predecessor. The identity
+# hash in the workspace name already pins selection/pairs/config, so this is
+# defense in depth, not the primary guard.
+_DERIVED_PREFIXES = ("database_sift", "database_merged", "coarse", "gluemap_aba")
+_DERIVED_FILES = ("pipeline_timing.pth",)
+
+
+@dataclass(frozen=True)
+class StageResume:
+    """Crash-resume decision for one GLUEMAP workspace.
+
+    Fresh workspaces reproduce the historical behavior exactly
+    (``force_load=False, rerun_from="retrieval"``). A resumed workspace reuses
+    probe-validated caches: every cache is load-tested before reuse, and
+    unloadable partial files are deleted so the runner rebuilds them.
+    Cross-configuration leakage is impossible by construction — the workspace
+    directory embeds the identity hash over selection, pairs, config,
+    checkpoints, and intrinsics. Resume reproduces fresh-run outputs on the
+    same host; bit-identity across different GPUs/drivers is not claimed.
+    """
+
+    force_load: bool
+    rerun_from: str | None
+    cache: Mapping[str, str]
+    dropped: tuple[str, ...]
+
+
+def _loadable_torch_cache(path: Path) -> bool:
+    """Probe-load a torch cache; delete unloadable partial files.
+
+    ``torch.save`` is not atomic, so a crash mid-write leaves a truncated
+    file that must be rebuilt, not reused. The probe transiently holds the
+    cache in RAM (seconds, versus hours to recompute star).
+    """
+
+    if not path.is_file() or path.stat().st_size == 0:
+        return False
+    try:
+        import torch
+    except ImportError:
+        # A host without torch cannot run GLUEMAP at all; report the cache
+        # as unusable without destroying it.
+        return False
+    try:
+        torch.load(str(path), map_location="cpu", weights_only=False)
+    except Exception:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return False
+    return True
+
+
+def _valid_sift_database(path: Path) -> bool:
+    """Check a SIFT database; delete corrupt partial files."""
+
+    if not path.is_file() or path.stat().st_size == 0:
+        return False
+    try:
+        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+            integrity = connection.execute("PRAGMA integrity_check").fetchone()
+            images = connection.execute("SELECT COUNT(*) FROM images").fetchone()
+        if (integrity or [None])[0] != "ok" or (images or [0])[0] <= 0:
+            raise ValueError("sift database failed validation")
+    except Exception:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return False
+    return True
+
+
+def _drop_derived_artifacts(write_dir: Path) -> tuple[str, ...]:
+    """Remove artifacts derived from star predictions ahead of a rebuild."""
+
+    dropped: list[str] = []
+    for child in sorted(write_dir.iterdir()):
+        name = child.name
+        if name in _DERIVED_FILES or name.startswith(_DERIVED_PREFIXES):
+            try:
+                if child.is_dir() and not child.is_symlink():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+            except OSError:
+                continue
+            dropped.append(name)
+    return tuple(dropped)
+
+
+def resolve_stage_resume(write_dir: str | Path) -> StageResume:
+    """Decide ``force_load``/``rerun_from`` from validated stage markers.
+
+    Upstream deletion semantics (`base_inference.run`): any set
+    ``rerun_from`` deletes the star cache (star triggers are ``None``);
+    ``"twoview"`` additionally deletes the twoview cache; only
+    ``"retrieval"`` touches descriptor caches. So ``None`` resumes
+    everything cached, ``"star"`` redoes star while keeping twoview, and
+    ``"twoview"`` redoes both. Post-star stages (coarse/SIFT/refinement)
+    always rerun — the runner offers no skip there — except the SIFT
+    database, which `force_load` reuses after validation.
+    """
+
+    root = Path(write_dir)
+    twoview_path = root / _TWOVIEW_CACHE
+    star_path = root / _STAR_CACHE
+    sift_path = root / _SIFT_DATABASE
+    if not (twoview_path.exists() or star_path.exists() or sift_path.exists()):
+        return StageResume(
+            force_load=False,
+            rerun_from="retrieval",
+            cache={},
+            dropped=(),
+        )
+    try:
+        import torch  # noqa: F401
+
+        torch_available = True
+    except ImportError:
+        torch_available = False
+    cache: dict[str, str] = {}
+    for label, found in (
+        ("retrieval", any(root.glob("salad_descriptors*.pt"))),
+        ("sift_database", _valid_sift_database(sift_path)),
+    ):
+        cache[label] = "present" if found else "missing"
+    for label, path in (("twoview", twoview_path), ("star", star_path)):
+        if not path.exists():
+            cache[label] = "missing"
+        elif _loadable_torch_cache(path):
+            cache[label] = "validated"
+        else:
+            cache[label] = "unvalidated-no-torch" if not torch_available else "corrupt-dropped"
+    if cache["twoview"] != "validated":
+        if star_path.exists():
+            try:
+                star_path.unlink()
+            except OSError:
+                pass
+            cache["star"] = "stale-dropped"
+        dropped = _drop_derived_artifacts(root) if root.is_dir() else ()
+        return StageResume(True, "twoview", cache, dropped)
+    if cache["star"] != "validated":
+        dropped = _drop_derived_artifacts(root) if root.is_dir() else ()
+        return StageResume(True, "star", cache, dropped)
+    return StageResume(True, None, cache, ())
+
+
 def force_sift_device(function: Callable[..., Any], sift_device: str) -> Callable[..., Any]:
     """Bind GLUEMAP's native SIFT preparation to an explicit safe device."""
 
@@ -506,6 +665,7 @@ def run_adapter_request(payload: Mapping[str, Any]) -> dict[str, Any]:
             calibration=dict(calibration),
             output_dir=workspace / "intrinsics_seed",
         )
+    stage_resume = resolve_stage_resume(workspace / "gluemap")
     gluemap_config = {
         **base_config,
         **execution_profile,
@@ -514,6 +674,10 @@ def run_adapter_request(payload: Mapping[str, Any]) -> dict[str, Any]:
         "temp_path": str(workspace / "tmp"),
         "skip_doppelgangers": bool(config.get("skip_doppelgangers", True)),
         "subfolder_regex": ".*",
+        # Crash-resume overrides the execution profile. Fresh workspaces
+        # resolve to the historical profile untouched (see StageResume).
+        "force_load": stage_resume.force_load,
+        "rerun_from": stage_resume.rerun_from,
     }
     if intrinsics_seed is not None:
         gluemap_config["gt_intrinsics_path"] = str(intrinsics_seed)
@@ -566,12 +730,12 @@ def run_adapter_request(payload: Mapping[str, Any]) -> dict[str, Any]:
         return {
             "status": "completed",
             "outputs": [str(output_model)],
-            "workspace_identity": identity,
+            "pose_only_mask": None,
+            "resume": asdict(stage_resume),
             "workspace": str(workspace),
             "checkpoint_hashes": checkpoint_hashes,
             "pair_count": len(expected_database_pairs),
             "exact_pair_proof": pair_proof,
-            "pose_only_mask": None,
             "model_capabilities": capabilities,
             "intrinsics_seed": None if intrinsics_seed is None else str(intrinsics_seed),
             "images_are_undistorted": bool(
@@ -710,12 +874,12 @@ def run_adapter_request(payload: Mapping[str, Any]) -> dict[str, Any]:
         "status": "completed",
         "outputs": [str(output_model)],
         "workspace_identity": identity,
-        "workspace": str(workspace),
+        "pose_only_mask": pose_only_state,
+        "resume": asdict(stage_resume),
         "checkpoint_hashes": checkpoint_hashes,
         "pair_count": len(admitted_indices),
         "pair_source": pair_source,
         "exact_pair_proof": pair_proof,
-        "pose_only_mask": pose_only_state,
         "model_capabilities": capabilities,
         "intrinsics_seed": None if intrinsics_seed is None else str(intrinsics_seed),
         "images_are_undistorted": bool(
